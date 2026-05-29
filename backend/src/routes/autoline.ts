@@ -9,7 +9,7 @@ import {
 import { authenticate } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { prisma } from '../utils/prisma';
-import type { Part, Compatibility, PartImage } from '../utils/types';
+import type { Part, Compatibility, PartImage, Template } from '../utils/types';
 
 export const autolineRouter = Router();
 
@@ -57,7 +57,7 @@ autolineRouter.get('/preview', authenticate, async (req, res, next) => {
     if (!template) throw new AppError(404, 'Brak domyślnego szablonu Autoline');
 
     const appBaseUrl = process.env.APP_PUBLIC_URL ?? 'http://localhost:4000';
-    const rows = parts.map((p) => previewRow(buildAutolineRow(p, template, appBaseUrl)));
+    const rows = parts.map((p) => previewRow(buildAutolineRow(p, template as Template, appBaseUrl)));
 
     res.json({ rows, total: rows.length, templateName: template.name });
   } catch (err) {
@@ -83,7 +83,7 @@ autolineRouter.post('/preview', authenticate, async (req, res, next) => {
     if (!template) throw new AppError(404, 'Szablon nie znaleziony');
 
     const appBaseUrl = process.env.APP_PUBLIC_URL ?? 'http://localhost:4000';
-    const rows = parts.map((p) => previewRow(buildAutolineRow(p, template, appBaseUrl)));
+    const rows = parts.map((p) => previewRow(buildAutolineRow(p, template as Template, appBaseUrl)));
 
     res.json({ rows, total: rows.length, templateName: template.name });
   } catch (err) {
@@ -109,7 +109,7 @@ autolineRouter.get('/export/csv', authenticate, async (req, res, next) => {
     if (!parts.length) throw new AppError(400, 'Brak części do eksportu (sprawdź stany magazynowe)');
 
     const appBaseUrl = process.env.APP_PUBLIC_URL ?? 'http://localhost:4000';
-    const rows = parts.map((p) => buildAutolineRow(p, template, appBaseUrl));
+    const rows = parts.map((p) => buildAutolineRow(p, template as Template, appBaseUrl));
     const csv  = generateCsv(rows);
 
     const filename = `autoline_export_${new Date().toISOString().slice(0, 10)}.csv`;
@@ -141,7 +141,7 @@ autolineRouter.post('/export/csv', authenticate, async (req, res, next) => {
     if (!parts.length) throw new AppError(400, 'Brak części do eksportu');
 
     const appBaseUrl = process.env.APP_PUBLIC_URL ?? 'http://localhost:4000';
-    const rows    = parts.map((p) => buildAutolineRow(p, template, appBaseUrl));
+    const rows    = parts.map((p) => buildAutolineRow(p, template as Template, appBaseUrl));
     const csv     = generateCsv(rows);
     const filename = `autoline_export_${new Date().toISOString().slice(0, 10)}.csv`;
 
@@ -174,7 +174,7 @@ autolineRouter.post('/export/xml', authenticate, async (req, res, next) => {
     if (!parts.length) throw new AppError(400, 'Brak części do eksportu');
 
     const appBaseUrl = process.env.APP_PUBLIC_URL ?? 'http://localhost:4000';
-    const rows    = parts.map((p) => buildAutolineRow(p, template, appBaseUrl));
+    const rows    = parts.map((p) => buildAutolineRow(p, template as Template, appBaseUrl));
     const xml     = generateXml(rows, feedTitle ?? 'Mini Baselinker Export');
     const filename = `autoline_export_${new Date().toISOString().slice(0, 10)}.xml`;
 

@@ -290,18 +290,18 @@ export async function publishListing(listingId: string): Promise<PublishResult> 
   if (!listing.template) throw new Error('Brak powiązanego szablonu');
 
   const part     = listing.part as PartFull;
-  const template = listing.template;
+  const template = listing.template as Template;
 
   try {
     switch (listing.portal) {
       case 'ALLEGRO':
-        await publishToAllegro(listing, part, template);
+        await publishToAllegro(listing as unknown as Listing, part, template);
         break;
       case 'OTOMOTO':
-        await publishToOtomoto(listing, part, template);
+        await publishToOtomoto(listing as unknown as Listing, part, template);
         break;
       case 'AUTOLINE':
-        await publishToAutoline(listing, part, template);
+        await publishToAutoline(listing as unknown as Listing, part, template);
         break;
     }
 
