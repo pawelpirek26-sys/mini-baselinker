@@ -1,0 +1,194 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// UŻYTKOWNICY
+// ─────────────────────────────────────────────
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      String   @default("admin") // admin | viewer
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parts     Part[]
+  templates Template[]
+  listings  Listing[]
+}
+
+// ─────────────────────────────────────────────
+// GŁÓWNA TABELA CZĘŚCI
+// ─────────────────────────────────────────────
+model Part {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  name          String
+  oemNumber     String?
+  catalogNumber String?
+  ean           String?
+
+  category    String          // hamulce | silnik | skrzynia | zawieszenie | elektryka | ...
+  subcategory String?
+  condition   String   @default("NEW")  // NEW | REGENERATED | USED
+
+  priceNet    Float
+  priceBrutto Float
+  vatRate     Float    @default(23)
+  stock       Int      @default(0)
+  stockMin    Int      @default(1)
+
+  descriptionShort String?
+  descriptionLong  String?
+  technicalParams  String?  // JSON
+
+  images        PartImage[]
+  compatibility Compatibility[]
+  listings      Listing[]
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([oemNumber])
+  @@index([category])
+  @@index([condition])
+}
+
+// ─────────────────────────────────────────────
+// ZDJĘCIA CZĘŚCI
+// ─────────────────────────────────────────────
+model PartImage {
+  id        String   @id @default(cuid())
+  partId    String
+  part      Part     @relation(fields: [partId], references: [id], onDelete: Cascade)
+  filename  String
+  url       String
+  order     Int      @default(0)
+  isCover   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([partId])
+}
+
+// ─────────────────────────────────────────────
+// KOMPATYBILNOŚĆ POJAZDÓW
+// ─────────────────────────────────────────────
+model Compatibility {
+  id         String  @id @default(cuid())
+  partId     String
+  part       Part    @relation(fields: [partId], references: [id], onDelete: Cascade)
+
+  brand      String
+  series     String?
+  model      String?
+  yearFrom   Int?
+  yearTo     Int?
+  engineCode String?
+  vinRange   String?
+  tecdocId   String?
+  notes      String?
+
+  @@index([partId])
+  @@index([brand])
+}
+
+// ─────────────────────────────────────────────
+// SZABLONY WYSTAWIEŃ (per portal)
+// ─────────────────────────────────────────────
+model Template {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  name               String
+  description        String?
+  portal             String   // ALLEGRO | OTOMOTO | AUTOLINE
+  isDefault          Boolean  @default(false)
+  isActive           Boolean  @default(true)
+  fieldMapping       String   // JSON
+  portalConfig       String   // JSON
+  portalCategoryId   String?
+  portalCategoryName String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  listings Listing[]
+
+  @@index([portal])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────
+// WYSTAWIENIA (Part × Template)
+// ─────────────────────────────────────────────
+model Listing {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  partId     String
+  part       Part     @relation(fields: [partId], references: [id], onDelete: Cascade)
+  templateId String
+  template   Template @relation(fields: [templateId], references: [id])
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+
+  portal  String  // ALLEGRO | OTOMOTO | AUTOLINE
+  status  String  @default("PENDING")
+  // PENDING | PROCESSING | ACTIVE | EXPIRED | ENDED | ERROR | DRAFT
+
+  externalId   String?
+  externalUrl  String?
+  externalData String?  // JSON
+  errorMessage String?
+  errorDetails String?  // JSON
+
+  listedAt  DateTime?
+  expiresAt DateTime?
+
+  history ListingHistory[]
+
+  @@unique([partId, templateId])
+  @@index([partId])
+  @@index([portal])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────
+// HISTORIA WYSTAWIEŃ
+// ─────────────────────────────────────────────
+model ListingHistory {
+  id        String   @id @default(cuid())
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  status    String   // PENDING | PROCESSING | ACTIVE | EXPIRED | ENDED | ERROR | DRAFT
+  message   String?
+  details   String?  // JSON
+  createdAt DateTime @default(now())
+
+  @@index([listingId])
+}
+
+// ─────────────────────────────────────────────
+// KONFIGURACJA POŁĄCZEŃ Z PORTALAMI
+// ─────────────────────────────────────────────
+model PortalCredential {
+  id        String    @id @default(cuid())
+  portal    String    @unique  // ALLEGRO | OTOMOTO | AUTOLINE
+  label     String
+  config    String    // JSON: { clientId, clientSecret, accessToken, refreshToken, ... }
+  isActive  Boolean   @default(true)
+  expiresAt DateTime?
+  updatedAt DateTime  @updatedAt
+}
