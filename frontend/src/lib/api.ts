@@ -2,7 +2,6 @@ import axios from 'axios';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-// ── Auth store ───────────────────────────────
 interface AuthState {
   token: string | null;
   user: { id: string; email: string; name: string; role: string } | null;
@@ -22,9 +21,12 @@ export const useAuthStore = create<AuthState>()(
   ),
 );
 
-// ── Axios instance ───────────────────────────
+const API_BASE = import.meta.env.VITE_API_URL || '';
+console.log('[API] VITE_API_URL =', import.meta.env.VITE_API_URL);
+console.log('[API] baseURL =', API_BASE ? `${API_BASE}/api` : '/api');
+
 export const api = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE ? `${API_BASE}/api` : '/api',
   headers: { 'Content-Type': 'application/json' },
 });
 
