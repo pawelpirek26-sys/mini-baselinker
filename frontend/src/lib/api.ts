@@ -21,12 +21,12 @@ export const useAuthStore = create<AuthState>()(
   ),
 );
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const API_BASE = 'https://mini-baselinker-production.up.railway.app';
 console.log('[API] VITE_API_URL =', import.meta.env.VITE_API_URL);
 console.log('[API] baseURL =', API_BASE ? `${API_BASE}/api` : '/api');
 
 export const api = axios.create({
-  baseURL: API_BASE ? `${API_BASE}/api` : '/api',
+  baseURL: `${API_BASE}/api`,
   headers: { 'Content-Type': 'application/json' },
 });
 
