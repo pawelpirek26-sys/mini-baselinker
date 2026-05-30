@@ -21,8 +21,10 @@ export const useAuthStore = create<AuthState>()(
   ),
 );
 
+const SUPABASE_FUNCTIONS_URL = 'https://chibbgzhnqsdipepmmbz.supabase.co/functions/v1/api'
+
 export const api = axios.create({
-  baseURL: 'https://mini-baselinker-production.up.railway.app/api',
+  baseURL: import.meta.env.VITE_API_URL ?? SUPABASE_FUNCTIONS_URL,
   headers: { 'Content-Type': 'application/json' },
 });
 
