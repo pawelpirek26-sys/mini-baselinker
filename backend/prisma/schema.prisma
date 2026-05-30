@@ -58,9 +58,34 @@ model Part {
   userId String
   user   User   @relation(fields: [userId], references: [id])
 
+  externalId     String?
+  externalSource String?  // "truckparts"
+  isActive       Boolean  @default(true)
+
   @@index([oemNumber])
   @@index([category])
   @@index([condition])
+  @@index([externalId])
+}
+
+// ─────────────────────────────────────────────
+// LOGI SYNCHRONIZACJI
+// ─────────────────────────────────────────────
+model SyncLog {
+  id          String    @id @default(cuid())
+  createdAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  status      String    // RUNNING | SUCCESS | PARTIAL | ERROR
+  source      String    @default("truckparts")
+  triggeredBy String    // MANUAL | SCHEDULED
+
+  totalFetched Int @default(0)
+  created      Int @default(0)
+  updated      Int @default(0)
+  deactivated  Int @default(0)
+  errors       Int @default(0)
+
+  errorDetails String?  // JSON array
 }
 
 // ─────────────────────────────────────────────

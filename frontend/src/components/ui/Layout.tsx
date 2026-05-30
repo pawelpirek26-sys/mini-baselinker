@@ -1,7 +1,7 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Package, FileText, Megaphone,
-  Truck, LogOut, ChevronRight, Settings, FileDown, Zap, Upload
+  Truck, LogOut, ChevronRight, Settings, FileDown, Zap, Upload, RefreshCw
 } from 'lucide-react';
 import { useAuthStore } from '../../lib/api';
 import clsx from 'clsx';
@@ -14,6 +14,7 @@ const NAV = [
   { to: '/listings',  icon: Megaphone,        label: 'Wystawienia' },
   { to: '/autoline',  icon: FileDown,         label: 'Autoline' },
   { to: '/import',    icon: Upload,          label: 'Import' },
+  { to: '/sync',      icon: RefreshCw,       label: 'Sync magazyn' },
   { to: '/settings',  icon: Settings,         label: 'Ustawienia' },
 ];
 

@@ -15,6 +15,7 @@ import AutolinePage from './pages/AutolinePage';
 import PublishPage from './pages/PublishPage';
 import ImportPage from './pages/ImportPage';
 import TemplateEditorPage from './pages/TemplateEditorPage';
+import SyncPage from './pages/SyncPage';
 
 const qc = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -52,6 +53,7 @@ export default function App() {
             <Route path="import" element={<ImportPage />} />
             <Route path="templates/new" element={<TemplateEditorPage />} />
             <Route path="templates/:id/edit" element={<TemplateEditorPage />} />
+            <Route path="sync" element={<SyncPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import { prisma } from './utils/prisma';
 import cors from 'cors';
 import path from 'path';
 import { authRouter } from './routes/auth';
@@ -13,6 +14,8 @@ import { otomotoRouter } from './routes/otomoto';
 import { autolineRouter } from './routes/autoline';
 import { publishRouter } from './routes/publish';
 import { importRouter } from './routes/import';
+import { syncRouter } from './routes/sync';
+import { runSync } from './services/truckpartsSyncEngine';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -53,6 +56,7 @@ app.use('/api/otomoto',         otomotoRouter);
 app.use('/api/autoline',        autolineRouter);
 app.use('/api/publish',         publishRouter);
 app.use('/api/import',          importRouter);
+app.use('/api/sync',            syncRouter);
 
 // ── Health check ─────────────────────────────
 app.get('/api/health', (_req, res) => {
@@ -64,6 +68,22 @@ app.use(errorHandler);
 
 app.listen(PORT, () => {
   console.log(`✅  API działa na http://localhost:${PORT}`);
+  scheduleAutoSync();
 });
+
+function scheduleAutoSync() {
+  if (!process.env.SUPABASE_SERVICE_KEY && !process.env.SUPABASE_ANON_KEY) return;
+  const hours = Number(process.env.SYNC_INTERVAL_HOURS ?? 6);
+  const ms = hours * 60 * 60 * 1000;
+  setInterval(async () => {
+    try {
+      const admin = await prisma.user.findFirst({ where: { role: 'admin' } }).catch(() => null);
+      if (!admin) return;
+      await runSync(admin.id, 'SCHEDULED');
+    } catch (err) {
+      console.error('Auto-sync failed:', err);
+    }
+  }, ms);
+}
 
 export default app;
