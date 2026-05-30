@@ -19,8 +19,20 @@ const app = express();
 const PORT = process.env.PORT ?? 4000;
 
 // ── Middleware ────────────────────────────────
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'https://mini-baselinker.vercel.app',
+  ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
+];
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL ?? 'http://localhost:5173',
+  origin: (origin, cb) => {
+    if (!origin || ALLOWED_ORIGINS.includes(origin) || /\.vercel\.app$/.test(origin)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`CORS: origin ${origin} not allowed`));
+    }
+  },
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
