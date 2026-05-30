@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Plus, Search, Filter, Package, Edit2, Trash2,
-  ChevronLeft, ChevronRight, Loader2
+  ChevronLeft, ChevronRight, Loader2, Download,
+  CheckSquare, Square, Eye, EyeOff, X,
 } from 'lucide-react';
-import { useParts, useDeletePart } from '../hooks/useParts';
+import { useParts, useDeletePart, useBulkParts } from '../hooks/useParts';
 import { PART_CATEGORIES, CONDITION_LABELS, type PartCondition } from '../types';
 import clsx from 'clsx';
 
@@ -14,20 +15,92 @@ const CONDITION_BADGE: Record<PartCondition, string> = {
   USED: 'bg-slate-700 text-slate-400',
 };
 
+function exportCsv(parts: { id: string; name: string; oemNumber?: string | null; catalogNumber?: string | null; category: string; condition: string; priceBrutto: number; stock: number; isActive: boolean }[]) {
+  const header = ['ID', 'Nazwa', 'OEM', 'Katalogowy', 'Kategoria', 'Stan', 'Cena brutto', 'Stock', 'Aktywna'];
+  const rows = parts.map((p) => [
+    p.id,
+    `"${p.name.replace(/"/g, '""')}"`,
+    p.oemNumber ?? '',
+    p.catalogNumber ?? '',
+    p.category,
+    p.condition,
+    p.priceBrutto.toFixed(2),
+    p.stock,
+    p.isActive ? 'TAK' : 'NIE',
+  ]);
+  const csv = [header, ...rows].map((r) => r.join(';')).join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `czesci_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function PartsPage() {
-  const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('');
+  const [search, setSearch]       = useState('');
+  const [category, setCategory]   = useState('');
   const [condition, setCondition] = useState('');
-  const [page, setPage] = useState(1);
+  const [isActive, setIsActive]   = useState('');
+  const [page, setPage]           = useState(1);
+  const [selected, setSelected]   = useState<Set<string>>(new Set());
+
   const deletePart = useDeletePart();
+  const bulk       = useBulkParts();
 
   const { data, isLoading } = useParts({
     page, limit: 20,
     search: search || undefined,
     category: category || undefined,
     condition: condition as PartCondition || undefined,
+    isActive: isActive as 'true' | 'false' || undefined,
     sortBy: 'createdAt', sortDir: 'desc',
   });
+
+  const items = data?.items ?? [];
+  const allSelected = items.length > 0 && items.every((p) => selected.has(p.id));
+
+  const toggleAll = useCallback(() => {
+    setSelected((prev) => {
+      if (allSelected) {
+        const next = new Set(prev);
+        items.forEach((p) => next.delete(p.id));
+        return next;
+      }
+      const next = new Set(prev);
+      items.forEach((p) => next.add(p.id));
+      return next;
+    });
+  }, [allSelected, items]);
+
+  const toggle = useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
+  function clearSelection() {
+    setSelected(new Set());
+  }
+
+  async function handleBulk(action: 'activate' | 'deactivate' | 'delete') {
+    const ids = Array.from(selected);
+    if (action === 'delete' && !confirm(`Usunąć ${ids.length} części?`)) return;
+    await bulk.mutateAsync({ ids, action });
+    clearSelection();
+  }
+
+  function handleExportSelected() {
+    const toExport = items.filter((p) => selected.has(p.id));
+    exportCsv(toExport);
+  }
+
+  function handleExportAll() {
+    exportCsv(items);
+  }
 
   function confirmDelete(id: string, name: string) {
     if (confirm(`Usunąć część "${name}"?`)) deletePart.mutate(id);
@@ -43,9 +116,18 @@ export default function PartsPage() {
             {data?.pagination.total ?? 0} pozycji w bazie
           </p>
         </div>
-        <Link to="/parts/new" className="btn-primary">
-          <Plus size={16} /> Dodaj część
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExportAll}
+            disabled={!items.length}
+            className="btn-secondary py-1.5 text-xs"
+          >
+            <Download size={13} /> Eksportuj CSV
+          </button>
+          <Link to="/parts/new" className="btn-primary">
+            <Plus size={16} /> Dodaj część
+          </Link>
+        </div>
       </div>
 
       {/* Filters */}
@@ -60,30 +142,68 @@ export default function PartsPage() {
             className="input pl-9"
           />
         </div>
-        <div className="flex items-center gap-2">
-          <Filter size={14} className="text-slate-500" />
-          <select
-            value={category}
-            onChange={(e) => { setCategory(e.target.value); setPage(1); }}
-            className="input w-44"
-          >
+        <div className="flex items-center gap-2 flex-wrap">
+          <Filter size={14} className="text-slate-500 shrink-0" />
+          <select value={category} onChange={(e) => { setCategory(e.target.value); setPage(1); }} className="input w-44">
             <option value="">Wszystkie kategorie</option>
             {PART_CATEGORIES.map((c) => (
               <option key={c.value} value={c.value}>{c.label}</option>
             ))}
           </select>
-          <select
-            value={condition}
-            onChange={(e) => { setCondition(e.target.value); setPage(1); }}
-            className="input w-36"
-          >
+          <select value={condition} onChange={(e) => { setCondition(e.target.value); setPage(1); }} className="input w-36">
             <option value="">Wszystkie stany</option>
             {Object.entries(CONDITION_LABELS).map(([k, v]) => (
               <option key={k} value={k}>{v}</option>
             ))}
           </select>
+          <select value={isActive} onChange={(e) => { setIsActive(e.target.value); setPage(1); }} className="input w-36">
+            <option value="">Aktywność: wszystkie</option>
+            <option value="true">Tylko aktywne</option>
+            <option value="false">Tylko nieaktywne</option>
+          </select>
         </div>
       </div>
+
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="card p-3 flex items-center gap-3 border-brand-700 bg-brand-900/20">
+          <span className="text-sm text-slate-300 font-medium">
+            {selected.size} zaznaczonych
+          </span>
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              onClick={() => handleBulk('activate')}
+              disabled={bulk.isPending}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-green-600/20 text-green-400 hover:bg-green-600/30 rounded-lg transition-colors"
+            >
+              <Eye size={12} /> Aktywuj
+            </button>
+            <button
+              onClick={() => handleBulk('deactivate')}
+              disabled={bulk.isPending}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-slate-700 text-slate-300 hover:bg-slate-600 rounded-lg transition-colors"
+            >
+              <EyeOff size={12} /> Dezaktywuj
+            </button>
+            <button
+              onClick={handleExportSelected}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-slate-700 text-slate-300 hover:bg-slate-600 rounded-lg transition-colors"
+            >
+              <Download size={12} /> Eksportuj zaznaczone
+            </button>
+            <button
+              onClick={() => handleBulk('delete')}
+              disabled={bulk.isPending}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors"
+            >
+              <Trash2 size={12} /> Usuń
+            </button>
+            <button onClick={clearSelection} className="p-1.5 text-slate-500 hover:text-slate-300">
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Table */}
       <div className="card overflow-hidden">
@@ -96,7 +216,15 @@ export default function PartsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-800 text-xs text-slate-500 uppercase tracking-wide">
-                  <th className="text-left px-5 py-3 w-12">&nbsp;</th>
+                  <th className="px-4 py-3 w-10">
+                    <button onClick={toggleAll} className="text-slate-500 hover:text-slate-300">
+                      {allSelected
+                        ? <CheckSquare size={15} className="text-brand-400" />
+                        : <Square size={15} />
+                      }
+                    </button>
+                  </th>
+                  <th className="text-left px-2 py-3 w-12">&nbsp;</th>
                   <th className="text-left px-3 py-3">Nazwa</th>
                   <th className="text-left px-3 py-3">OEM</th>
                   <th className="text-left px-3 py-3">Kategoria</th>
@@ -108,9 +236,24 @@ export default function PartsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/50">
-                {data?.items.map((part) => (
-                  <tr key={part.id} className="group hover:bg-slate-900/50 transition-colors">
-                    <td className="px-5 py-3">
+                {items.map((part) => (
+                  <tr
+                    key={part.id}
+                    className={clsx(
+                      'group hover:bg-slate-900/50 transition-colors',
+                      selected.has(part.id) && 'bg-brand-900/10',
+                      !part.isActive && 'opacity-50',
+                    )}
+                  >
+                    <td className="px-4 py-3">
+                      <button onClick={() => toggle(part.id)} className="text-slate-500 hover:text-slate-300">
+                        {selected.has(part.id)
+                          ? <CheckSquare size={15} className="text-brand-400" />
+                          : <Square size={15} />
+                        }
+                      </button>
+                    </td>
+                    <td className="px-2 py-3">
                       <div className="w-9 h-9 rounded-lg bg-slate-800 overflow-hidden">
                         {part.images[0] ? (
                           <img src={part.images[0].url} alt="" className="w-full h-full object-cover" />
@@ -165,9 +308,9 @@ export default function PartsPage() {
                     </td>
                   </tr>
                 ))}
-                {!data?.items.length && (
+                {!items.length && (
                   <tr>
-                    <td colSpan={9} className="px-5 py-16 text-center text-slate-500">
+                    <td colSpan={10} className="px-5 py-16 text-center text-slate-500">
                       Brak części. <Link to="/parts/new" className="text-brand-400 hover:text-brand-300">Dodaj pierwszą →</Link>
                     </td>
                   </tr>
@@ -180,6 +323,7 @@ export default function PartsPage() {
               <div className="px-5 py-3 border-t border-slate-800 flex items-center justify-between text-sm">
                 <span className="text-slate-500">
                   Strona {data?.pagination.page} z {data?.pagination.totalPages}
+                  {selected.size > 0 && <span className="ml-3 text-brand-400">{selected.size} zaznaczonych</span>}
                 </span>
                 <div className="flex gap-2">
                   <button onClick={() => setPage((p) => p - 1)} disabled={page <= 1} className="btn-secondary py-1 px-2">

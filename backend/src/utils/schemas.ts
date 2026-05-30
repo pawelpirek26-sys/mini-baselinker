@@ -37,6 +37,7 @@ export const partsQuerySchema = z.object({
   search: z.string().optional(),
   category: z.string().optional(),
   condition: z.enum(['NEW', 'REGENERATED', 'USED']).optional(),
+  isActive: z.enum(['true', 'false']).optional(),
   sortBy: z.enum(['name', 'createdAt', 'priceNet', 'stock']).default('createdAt'),
   sortDir: z.enum(['asc', 'desc']).default('desc'),
 });

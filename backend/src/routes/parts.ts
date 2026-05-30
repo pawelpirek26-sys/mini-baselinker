@@ -7,6 +7,56 @@ import { partSchema, partUpdateSchema, partsQuerySchema } from '../utils/schemas
 export const partsRouter = Router();
 partsRouter.use(authenticate);
 
+// ── GET /api/parts/stats ─────────────────────
+partsRouter.get('/stats', async (req, res, next) => {
+  try {
+    const userId = req.user!.userId;
+    const [total, active, byCategory] = await Promise.all([
+      prisma.part.count({ where: { userId } }),
+      prisma.part.count({ where: { userId, isActive: true } }),
+      prisma.part.groupBy({
+        by: ['category'],
+        where: { userId },
+        _count: { id: true },
+        orderBy: { _count: { id: 'desc' } },
+        take: 8,
+      }),
+    ]);
+    res.json({
+      total,
+      active,
+      inactive: total - active,
+      byCategory: byCategory.map((r) => ({ category: r.category, count: r._count.id })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── PATCH /api/parts/bulk ────────────────────
+partsRouter.patch('/bulk', async (req, res, next) => {
+  try {
+    const { ids, action } = req.body as { ids: string[]; action: 'activate' | 'deactivate' | 'delete' };
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ error: 'ids wymagane' });
+      return;
+    }
+    const owned = await prisma.part.count({ where: { id: { in: ids }, userId: req.user!.userId } });
+    if (owned !== ids.length) {
+      res.status(403).json({ error: 'Brak dostępu do niektórych części' });
+      return;
+    }
+    if (action === 'delete') {
+      await prisma.part.deleteMany({ where: { id: { in: ids } } });
+    } else {
+      await prisma.part.updateMany({ where: { id: { in: ids } }, data: { isActive: action === 'activate' } });
+    }
+    res.json({ affected: ids.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── GET /api/parts ───────────────────────────
 partsRouter.get('/', async (req, res, next) => {
   try {
@@ -24,6 +74,7 @@ partsRouter.get('/', async (req, res, next) => {
       }),
       ...(q.category && { category: q.category }),
       ...(q.condition && { condition: q.condition }),
+      ...(q.isActive !== undefined && { isActive: q.isActive === 'true' }),
     };
 
     const [items, total] = await Promise.all([

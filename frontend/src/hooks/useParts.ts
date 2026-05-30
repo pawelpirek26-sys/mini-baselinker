@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import type { Part, PaginatedResponse } from '../types';
+import type { Part, PartStats, PaginatedResponse } from '../types';
 import toast from 'react-hot-toast';
 
 interface PartsFilters {
@@ -9,6 +9,7 @@ interface PartsFilters {
   search?: string;
   category?: string;
   condition?: string;
+  isActive?: 'true' | 'false';
   sortBy?: string;
   sortDir?: 'asc' | 'desc';
 }
@@ -17,6 +18,13 @@ export const useParts = (filters: PartsFilters = {}) =>
   useQuery<PaginatedResponse<Part>>({
     queryKey: ['parts', filters],
     queryFn: () => api.get('/parts', { params: filters }).then((r) => r.data),
+  });
+
+export const usePartStats = () =>
+  useQuery<PartStats>({
+    queryKey: ['parts', 'stats'],
+    queryFn: () => api.get('/parts/stats').then((r) => r.data),
+    staleTime: 60_000,
   });
 
 export const usePart = (id: string) =>
@@ -63,5 +71,19 @@ export const useDeletePart = () => {
       toast.success('Część usunięta');
     },
     onError: () => toast.error('Błąd usuwania'),
+  });
+};
+
+export const useBulkParts = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids, action }: { ids: string[]; action: 'activate' | 'deactivate' | 'delete' }) =>
+      api.patch('/parts/bulk', { ids, action }).then((r) => r.data),
+    onSuccess: (_data, { action }) => {
+      qc.invalidateQueries({ queryKey: ['parts'] });
+      const msg = action === 'delete' ? 'Usunięto' : action === 'activate' ? 'Aktywowano' : 'Dezaktywowano';
+      toast.success(msg);
+    },
+    onError: () => toast.error('Błąd operacji'),
   });
 };

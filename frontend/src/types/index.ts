@@ -40,6 +40,9 @@ export interface Part {
   vatRate: number;
   stock: number;
   stockMin: number;
+  isActive: boolean;
+  externalId?: string | null;
+  externalSource?: string | null;
   descriptionShort?: string | null;
   descriptionLong?: string | null;
   technicalParams?: string | null;
@@ -49,6 +52,13 @@ export interface Part {
   _count?: { listings: number; compatibility: number };
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PartStats {
+  total: number;
+  active: number;
+  inactive: number;
+  byCategory: { category: string; count: number }[];
 }
 
 export interface Template {
