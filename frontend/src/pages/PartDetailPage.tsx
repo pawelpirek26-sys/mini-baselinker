@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Edit2, Trash2, Plus, ExternalLink,
-  Package, Car, Megaphone, Loader2, Upload, X
+  Package, Car, Megaphone, Loader2, Upload, X, GripVertical,
 } from 'lucide-react';
+import type { PartImage } from '../types';
 import { usePart, useDeletePart } from '../hooks/useParts';
 import { useTemplates } from '../hooks/useTemplates';
 import { usePublishListing, usePublishPart, useAllegroStatus } from '../hooks/useAllegro';
@@ -47,6 +48,43 @@ export default function PartDetailPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['part', id] }),
   });
 
+  // Drag-and-drop image reorder
+  const [imgOrder, setImgOrder] = useState<PartImage[]>([]);
+  useEffect(() => { if (part) setImgOrder(part.images); }, [part?.images]);
+  const dragIdx = useRef<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
+
+  const reorderImages = useMutation({
+    mutationFn: (order: string[]) => api.patch('/images/reorder', { partId: id, order }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['part', id] }),
+  });
+
+  function onDragStart(idx: number) {
+    dragIdx.current = idx;
+  }
+
+  function onDragOver(e: React.DragEvent, idx: number) {
+    e.preventDefault();
+    if (dragIdx.current === null || dragIdx.current === idx) { setDragOver(idx); return; }
+    const next = [...imgOrder];
+    const [moved] = next.splice(dragIdx.current, 1);
+    next.splice(idx, 0, moved);
+    dragIdx.current = idx;
+    setDragOver(idx);
+    setImgOrder(next);
+  }
+
+  function onDrop() {
+    setDragOver(null);
+    dragIdx.current = null;
+    reorderImages.mutate(imgOrder.map((img) => img.id));
+  }
+
+  function onDragEnd() {
+    setDragOver(null);
+    dragIdx.current = null;
+  }
+
   // Bulk listing
   const bulkList = useMutation({
     mutationFn: (templateIds: string[]) =>
@@ -82,7 +120,6 @@ export default function PartDetailPage() {
   );
   if (!part) return <div className="p-6 text-slate-400">Część nie znaleziona</div>;
 
-  const coverImg = part.images.find((i) => i.isCover) ?? part.images[0];
   const activeListings = part.listings?.filter((l) => l.status === 'ACTIVE') ?? [];
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-5">
@@ -176,23 +213,69 @@ export default function PartDetailPage() {
                   onChange={(e) => e.target.files && uploadImages.mutate(e.target.files)} />
               </label>
             </div>
-            {coverImg && (
-              <img src={coverImg.url} alt={part.name} className="w-full h-40 object-contain rounded-lg bg-slate-800" />
+
+            {/* Cover preview */}
+            {imgOrder[0] && (
+              <img
+                src={imgOrder[0].url}
+                alt={part.name}
+                className="w-full h-40 object-contain rounded-lg bg-slate-800"
+              />
             )}
-            <div className="flex flex-wrap gap-2">
-              {part.images.map((img) => (
-                <div key={img.id} className="relative group w-16 h-16">
-                  <img src={img.url} alt="" className="w-full h-full object-cover rounded-lg" />
-                  <button
-                    onClick={() => deleteImage.mutate(img.id)}
-                    className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 rounded-full flex items-center justify-center
-                               opacity-0 group-hover:opacity-100 transition-opacity"
+
+            {/* Draggable thumbnails */}
+            {imgOrder.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {imgOrder.map((img, idx) => (
+                  <div
+                    key={img.id}
+                    draggable
+                    onDragStart={() => onDragStart(idx)}
+                    onDragOver={(e) => onDragOver(e, idx)}
+                    onDrop={onDrop}
+                    onDragEnd={onDragEnd}
+                    className={clsx(
+                      'relative group w-16 h-16 rounded-lg overflow-hidden cursor-grab active:cursor-grabbing select-none transition-all',
+                      dragOver === idx && dragIdx.current !== idx
+                        ? 'ring-2 ring-brand-500 scale-105'
+                        : 'ring-1 ring-slate-700',
+                      idx === 0 && 'ring-brand-600/50',
+                    )}
                   >
-                    <X size={10} />
-                  </button>
-                </div>
-              ))}
-            </div>
+                    <img src={img.url} alt="" className="w-full h-full object-cover" />
+
+                    {/* Okładka badge */}
+                    {idx === 0 && (
+                      <span className="absolute bottom-0 left-0 right-0 text-center text-[9px] font-bold uppercase
+                                       bg-brand-600/80 text-white py-0.5 leading-tight">
+                        okładka
+                      </span>
+                    )}
+
+                    {/* Drag handle */}
+                    <div className="absolute top-0.5 left-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <GripVertical size={12} className="text-white drop-shadow" />
+                    </div>
+
+                    {/* Delete */}
+                    <button
+                      onClick={() => deleteImage.mutate(img.id)}
+                      className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 rounded-full
+                                 flex items-center justify-center opacity-0 group-hover:opacity-100
+                                 transition-opacity z-10"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {imgOrder.length > 1 && (
+              <p className="text-xs text-slate-600">
+                Przeciągnij miniaturę aby zmienić kolejność. Pierwsze zdjęcie = okładka.
+              </p>
+            )}
           </div>
 
           {/* Info */}
