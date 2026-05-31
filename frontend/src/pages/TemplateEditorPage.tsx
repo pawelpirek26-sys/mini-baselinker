@@ -295,6 +295,7 @@ export default function TemplateEditorPage() {
             </div>
 
             <FieldMapper
+              key={portal}
               portal={portal}
               fieldMapping={mapping}
               portalConfig={config}
