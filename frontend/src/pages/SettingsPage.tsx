@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   CheckCircle2, XCircle, ExternalLink, Loader2, Download,
-  PlugZap, RefreshCw, AlertTriangle, Settings
+  PlugZap, RefreshCw, AlertTriangle, Settings, Bell, Send,
 } from 'lucide-react';
 import {
   useAllegroStatus,
@@ -15,6 +15,8 @@ import {
   useOtomotoConfigure,
   useOtomotoDisconnect,
 } from '../hooks/useOtomoto';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '../lib/api';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
@@ -261,6 +263,88 @@ function OtomotoPanel() {
   );
 }
 
+// ── Notifications Panel ──────────────────────
+interface NotifSettings { listingError: boolean; listingActive: boolean; syncComplete: boolean; lowStock: boolean }
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={clsx(
+        'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors',
+        checked ? 'bg-brand-600' : 'bg-slate-700',
+      )}
+    >
+      <span className={clsx('pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform', checked ? 'translate-x-4' : 'translate-x-0')} />
+    </button>
+  );
+}
+
+function NotificationsPanel() {
+  const qc = useQueryClient();
+  const { data: settings, isLoading } = useQuery<NotifSettings>({
+    queryKey: ['notif-settings'],
+    queryFn: () => api.get('/auth/notification-settings').then((r) => r.data),
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: (data: Partial<NotifSettings>) => api.patch('/auth/notification-settings', data).then((r) => r.data),
+    onSuccess: (data) => { qc.setQueryData(['notif-settings'], data); toast.success('Zapisano ustawienia'); },
+    onError: () => toast.error('Błąd zapisu'),
+  });
+
+  const testMutation = useMutation({
+    mutationFn: () => api.post('/auth/test-email').then((r) => r.data),
+    onSuccess: (data) => toast.success(`Testowy e-mail wysłany na ${data.sentTo}`),
+    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Błąd wysyłki — sprawdź RESEND_API_KEY'),
+  });
+
+  if (isLoading || !settings) {
+    return <div className="flex items-center gap-2 text-slate-500 text-sm"><Loader2 size={14} className="animate-spin" /> Ładowanie...</div>;
+  }
+
+  const items: { key: keyof NotifSettings; label: string; desc: string }[] = [
+    { key: 'listingError',  label: 'Błąd wystawienia',       desc: 'Gdy wystawienie zmieni status na ERROR' },
+    { key: 'listingActive', label: 'Wystawienie aktywne',    desc: 'Gdy wystawienie zostanie aktywowane (ACTIVE)' },
+    { key: 'syncComplete',  label: 'Koniec synchronizacji',  desc: 'Po zakończeniu synchronizacji z TruckParts' },
+    { key: 'lowStock',      label: 'Niski stan magazynowy',  desc: 'Gdy stock ≤ stockMin po ręcznej aktualizacji' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-3">
+        {items.map(({ key, label, desc }) => (
+          <div key={key} className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-sm text-slate-200">{label}</div>
+              <div className="text-xs text-slate-500">{desc}</div>
+            </div>
+            <Toggle
+              checked={settings[key]}
+              onChange={(v) => saveMutation.mutate({ [key]: v })}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+        <p className="text-xs text-slate-500">
+          E-mail: konto zalogowanego użytkownika.<br />
+          Wymagane: <code className="font-mono bg-slate-800 px-1 rounded">RESEND_API_KEY</code> w Edge Function.
+        </p>
+        <button
+          onClick={() => testMutation.mutate()}
+          disabled={testMutation.isPending}
+          className="btn-secondary py-1.5 px-3 text-xs shrink-0"
+        >
+          {testMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+          Wyślij test
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AutolinePanel() {
   return (
     <div className="space-y-3">
@@ -316,6 +400,19 @@ export default function SettingsPage() {
         <PortalCard name="Autoline" logo="🌍" color="bg-green-500">
           <AutolinePanel />
         </PortalCard>
+
+        <div className="card overflow-hidden">
+          <div className="h-1 bg-violet-500" />
+          <div className="p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center">
+                <Bell size={18} className="text-violet-400" />
+              </div>
+              <h2 className="text-base font-semibold text-white">Powiadomienia e-mail</h2>
+            </div>
+            <NotificationsPanel />
+          </div>
+        </div>
       </div>
 
       {/* Instrukcja */}
