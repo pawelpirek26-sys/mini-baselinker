@@ -1,7 +1,6 @@
 // @ts-nocheck — Deno edge function (npm: specifiers, no tsconfig)
 import postgres from 'npm:postgres@3'
 import { createClient } from 'npm:@supabase/supabase-js@2'
-import bcrypt from 'npm:bcryptjs@2'
 import { SignJWT, jwtVerify } from 'npm:jose@5'
 import { z } from 'npm:zod@3'
 
@@ -15,7 +14,7 @@ const JWT_KEY = new TextEncoder().encode(JWT_RAW)
 
 let _db: ReturnType<typeof postgres> | null = null
 function db(): ReturnType<typeof postgres> {
-  if (!_db) _db = postgres(DB_URL, { ssl: 'require', max: 3, idle_timeout: 20, connect_timeout: 10, prepare: false })
+  if (!_db) _db = postgres(DB_URL, { ssl: 'require', max: 3, idle_timeout: 20, connect_timeout: 10, prepare: false, connection: { search_path: 'public,extensions' } })
   return _db
 }
 
@@ -90,15 +89,15 @@ async function handleAuth(req: Request, s: string[]): Promise<Response> {
     const [ex] = await d`SELECT id FROM "User" WHERE email = ${body.email}`
     if (ex) return E('Konto z tym emailem już istnieje', 409, req)
     const id = uid(), now = new Date()
-    const hash = await bcrypt.hash(body.password, 12)
+    const [{ hash }] = await d`SELECT extensions.crypt(${body.password}::text, extensions.gen_salt('bf', 10)) AS hash`
     await d`INSERT INTO "User" (id,email,password,name,role,"createdAt","updatedAt") VALUES (${id},${body.email},${hash},${body.name},'admin',${now},${now})`
     return R({ user: { id, email: body.email, name: body.name, role: 'admin' }, token: await sign({ userId: id, email: body.email, role: 'admin' }) }, 201, req)
   }
 
   if (req.method === 'POST' && action === 'login') {
     const body = z.object({ email: z.string().email(), password: z.string() }).parse(await req.json())
-    const [u] = await d`SELECT * FROM "User" WHERE email = ${body.email} LIMIT 1`
-    if (!u || !(await bcrypt.compare(body.password, u.password))) return E('Nieprawidłowy email lub hasło', 401, req)
+    const [u] = await d`SELECT * FROM "User" WHERE email = ${body.email} AND password = extensions.crypt(${body.password}::text, password) LIMIT 1`
+    if (!u) return E('Nieprawidłowy email lub hasło', 401, req)
     return R({ user: { id: u.id, email: u.email, name: u.name, role: u.role }, token: await sign({ userId: u.id, email: u.email, role: u.role }) }, 200, req)
   }
 
@@ -1139,23 +1138,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   try {
     if (group === 'health') return R({ status: 'ok', timestamp: new Date().toISOString() }, 200, req)
-    if (group === 'auth')          return handleAuth(req, sub)
-    if (group === 'parts')         return handleParts(req, sub, url)
-    if (group === 'templates')     return handleTemplates(req, sub, url)
-    if (group === 'listings')      return handleListings(req, sub, url)
-    if (group === 'images')        return handleImages(req, sub)
-    if (group === 'compatibility') return handleCompatibility(req, sub)
-    if (group === 'sync')          return handleSync(req, sub)
-    if (group === 'autoline')      return handleAutoline(req, sub, url)
-    if (group === 'import')        return handleImport(req, sub)
-    if (group === 'publish')       return handlePublish(req, sub, url)
-    if (group === 'allegro')       return handleAllegro(req)
-    if (group === 'otomoto')       return handleOtomoto(req)
+    if (group === 'auth')          return await handleAuth(req, sub)
+    if (group === 'parts')         return await handleParts(req, sub, url)
+    if (group === 'templates')     return await handleTemplates(req, sub, url)
+    if (group === 'listings')      return await handleListings(req, sub, url)
+    if (group === 'images')        return await handleImages(req, sub)
+    if (group === 'compatibility') return await handleCompatibility(req, sub)
+    if (group === 'sync')          return await handleSync(req, sub)
+    if (group === 'autoline')      return await handleAutoline(req, sub, url)
+    if (group === 'import')        return await handleImport(req, sub)
+    if (group === 'publish')       return await handlePublish(req, sub, url)
+    if (group === 'allegro')       return await handleAllegro(req)
+    if (group === 'otomoto')       return await handleOtomoto(req)
     return E('Not found', 404, req)
   } catch (e: any) {
     const status = e?.status ?? 500
     const msg = status < 500 ? e.message : 'Błąd serwera'
-    if (status >= 500) console.error('Edge Function error:', e)
+    console.error('Edge Function error:', e)
     return E(msg, status, req)
   }
 })
