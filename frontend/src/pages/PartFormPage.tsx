@@ -1,11 +1,12 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { ArrowLeft, Save, Loader2 } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Sparkles, AlertCircle } from 'lucide-react';
 import { usePart, useCreatePart, useUpdatePart } from '../hooks/useParts';
 import { PART_CATEGORIES } from '../types';
+import { api } from '../lib/api';
 
 const schema = z.object({
   name: z.string().min(3, 'Min. 3 znaki'),
@@ -45,7 +46,10 @@ export default function PartFormPage() {
   const createPart = useCreatePart();
   const updatePart = useUpdatePart(id ?? '');
 
-  const { register, handleSubmit, reset, watch, setValue, formState: { errors, isSubmitting } } =
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError,   setAiError]   = useState('');
+
+  const { register, handleSubmit, reset, watch, setValue, getValues, formState: { errors, isSubmitting } } =
     useForm<FormData>({
       resolver: zodResolver(schema),
       defaultValues: {
@@ -84,6 +88,27 @@ export default function PartFormPage() {
       setValue('priceBrutto', Math.round(priceNet * (1 + vatRate / 100) * 100) / 100);
     }
   }, [priceNet, vatRate, setValue]);
+
+  async function generateAiDescription() {
+    setAiError('');
+    setAiLoading(true);
+    try {
+      const vals = getValues();
+      const { data } = await api.post('/ai/description', {
+        name:          vals.name,
+        oemNumber:     vals.oemNumber || undefined,
+        category:      vals.category,
+        condition:     vals.condition,
+        compatibility: existing?.compatibility,
+      });
+      if (data.descriptionShort) setValue('descriptionShort', data.descriptionShort);
+      if (data.descriptionLong)  setValue('descriptionLong',  data.descriptionLong);
+    } catch (e: any) {
+      setAiError(e.response?.data?.error ?? 'Błąd generowania opisu');
+    } finally {
+      setAiLoading(false);
+    }
+  }
 
   async function onSubmit(data: FormData) {
     if (isEdit) {
@@ -187,7 +212,28 @@ export default function PartFormPage() {
 
         {/* Opisy */}
         <div className="card p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">Opisy</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">Opisy</h2>
+            <button
+              type="button"
+              onClick={generateAiDescription}
+              disabled={aiLoading || !watch('name')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                         bg-violet-600/20 text-violet-400 border border-violet-700/40
+                         hover:bg-violet-600/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {aiLoading
+                ? <Loader2 size={12} className="animate-spin" />
+                : <Sparkles size={12} />}
+              Generuj z AI
+            </button>
+          </div>
+          {aiError && (
+            <div className="flex items-center gap-2 text-xs text-red-400 bg-red-500/10 border border-red-800/40 rounded-lg px-3 py-2">
+              <AlertCircle size={12} className="shrink-0" />
+              {aiError}
+            </div>
+          )}
           <Field label="Krótki opis (maks. 500 znaków)" error={errors.descriptionShort?.message}>
             <textarea {...register('descriptionShort')} rows={2} className="input resize-none"
               placeholder="Krótki opis widoczny w wynikach wyszukiwania..." />

@@ -13,6 +13,7 @@ const JWT_RAW     = Deno.env.get('JWT_SECRET') ?? 'change-me-in-prod'
 const JWT_KEY     = new TextEncoder().encode(JWT_RAW)
 const RESEND_KEY  = Deno.env.get('RESEND_API_KEY') ?? ''
 const RESEND_FROM = Deno.env.get('RESEND_FROM') ?? 'Mini Baselinker <onboarding@resend.dev>'
+const OPENAI_KEY  = Deno.env.get('OPENAI_API_KEY') ?? ''
 
 let _db: ReturnType<typeof postgres> | null = null
 function db(): ReturnType<typeof postgres> {
@@ -1209,6 +1210,66 @@ async function handlePublish(req: Request, s: string[], url: URL): Promise<Respo
   return E('Not found', 404, req)
 }
 
+// ─── AI ───────────────────────────────────────────────────────────────────────
+
+async function handleAI(req: Request, s: string[]): Promise<Response> {
+  const { userId: _ } = await auth(req)
+  const m = req.method
+  const [s0] = s
+
+  if (m === 'POST' && s0 === 'description') {
+    if (!OPENAI_KEY) return E('OPENAI_API_KEY nie skonfigurowany w Edge Function', 503, req)
+    const body = await req.json()
+    const { name, oemNumber, category, condition, compatibility } = body
+    if (!name) return E('Brak nazwy części', 400, req)
+
+    const condStr = condition === 'NEW' ? 'nowa' : condition === 'REGENERATED' ? 'regenerowana' : 'używana'
+    const compatLines = Array.isArray(compatibility) && compatibility.length
+      ? `\nKompatybilność: ${compatibility.map((c: any) => [c.brand, c.model, c.yearFrom && c.yearTo ? `${c.yearFrom}–${c.yearTo}` : ''].filter(Boolean).join(' ')).join('; ')}`
+      : ''
+
+    const userMsg = `Wygeneruj profesjonalny opis oferty dla części samochodowej/ciężarowej.
+
+Dane części:
+Nazwa: ${name}${oemNumber ? `\nNumer OEM: ${oemNumber}` : ''}
+Kategoria: ${category ?? 'inne'}
+Stan: ${condStr}${compatLines}
+
+Zwróć obiekt JSON z dwoma polami:
+- "descriptionShort": jedno zdanie promocyjne po polsku, max 280 znaków, bez HTML
+- "descriptionLong": pełny opis HTML po polsku (użyj <h3>, <p>, <ul><li>) o długości 150–350 słów; uwzględnij: zastosowanie, cechy techniczne, zalety, gwarancję jakości`
+
+    const oaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'Jesteś ekspertem od części samochodowych i ciężarowych. Piszesz wyłącznie po polsku. Zwracasz tylko poprawny JSON.' },
+          { role: 'user', content: userMsg },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.7,
+        max_tokens: 1200,
+      }),
+    })
+
+    if (!oaiRes.ok) {
+      console.error('OpenAI error', oaiRes.status, await oaiRes.text())
+      return E('Błąd API OpenAI — sprawdź klucz OPENAI_API_KEY', 502, req)
+    }
+
+    const oaiData = await oaiRes.json()
+    const content = JSON.parse(oaiData.choices[0].message.content)
+    return R({
+      descriptionShort: String(content.descriptionShort ?? '').slice(0, 500),
+      descriptionLong:  String(content.descriptionLong  ?? ''),
+    }, 200, req)
+  }
+
+  return E('Not found', 404, req)
+}
+
 // ─── ALLEGRO / OTOMOTO stubs ─────────────────────────────────────────────────
 
 async function handleAllegro(req: Request): Promise<Response> {
@@ -1245,6 +1306,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (group === 'autoline')      return await handleAutoline(req, sub, url)
     if (group === 'import')        return await handleImport(req, sub)
     if (group === 'publish')       return await handlePublish(req, sub, url)
+    if (group === 'ai')            return await handleAI(req, sub)
     if (group === 'allegro')       return await handleAllegro(req)
     if (group === 'otomoto')       return await handleOtomoto(req)
     return E('Not found', 404, req)
