@@ -189,7 +189,11 @@ async function handleParts(req: Request, s: string[], url: URL): Promise<Respons
     if (!Array.isArray(ids) || !ids.length) return E('ids wymagane', 400, req)
     const [c] = await d`SELECT COUNT(*) n FROM "Part" WHERE id=ANY(${ids}::text[]) AND "userId"=${userId}`
     if (+c.n !== ids.length) return E('Brak dostępu', 403, req)
-    if (action === 'delete') { await d`DELETE FROM "Part" WHERE id=ANY(${ids}::text[]) AND "userId"=${userId}` }
+    if (action === 'delete') {
+      const blocked = await d`SELECT COUNT(*) n FROM "Listing" WHERE "partId"=ANY(${ids}::text[]) AND status IN ('ACTIVE','PENDING','PROCESSING')`
+      if (+blocked[0].n > 0) return E('Niektóre części mają aktywne wystawienia i nie mogą być usunięte', 409, req)
+      await d`DELETE FROM "Part" WHERE id=ANY(${ids}::text[]) AND "userId"=${userId}`
+    }
     else { await d`UPDATE "Part" SET "isActive"=${action === 'activate'},"updatedAt"=now() WHERE id=ANY(${ids}::text[]) AND "userId"=${userId}` }
     return R({ affected: ids.length }, 200, req)
   }
@@ -294,6 +298,8 @@ async function handleParts(req: Request, s: string[], url: URL): Promise<Respons
   if (m === 'DELETE' && s0 && !s1) {
     const [ex] = await d`SELECT id FROM "Part" WHERE id=${s0} AND "userId"=${userId}`
     if (!ex) return E('Część nie znaleziona', 404, req)
+    const [activeListing] = await d`SELECT id FROM "Listing" WHERE "partId"=${s0} AND status IN ('ACTIVE','PENDING','PROCESSING')`
+    if (activeListing) return E('Nie można usunąć części z aktywnymi wystawieniami', 409, req)
     await d`DELETE FROM "Part" WHERE id=${s0}`
     return new Response(null, { status: 204, headers: cors(req.headers.get('Origin')) })
   }
@@ -434,6 +440,8 @@ async function handleListings(req: Request, s: string[], url: URL): Promise<Resp
     const [listing] = await d`SELECT * FROM "Listing" WHERE id=${s0} AND "userId"=${userId}`
     if (!listing) return E('Wystawienie nie znalezione', 404, req)
     const body = await req.json()
+    const validStatuses = ['PENDING','PROCESSING','ACTIVE','EXPIRED','ENDED','ERROR','DRAFT']
+    if (!validStatuses.includes(body.status)) return E('Nieprawidłowy status', 400, req)
     const now = new Date()
     await d`UPDATE "Listing" SET status=${body.status},"externalId"=${body.externalId??listing.externalId},"externalUrl"=${body.externalUrl??listing.externalUrl},"errorMessage"=${body.errorMessage??null},"updatedAt"=${now}${body.status==='ACTIVE'?d`,listedAt=${now}`:d``} WHERE id=${s0}`
     await d`INSERT INTO "ListingHistory" (id,"listingId",status,message,"createdAt") VALUES (${uid()},${s0},${body.status},${body.errorMessage??`Status zmieniony na ${body.status}`},${now})`
@@ -532,7 +540,7 @@ async function handleImages(req: Request, s: string[]): Promise<Response> {
     const [part] = await d`SELECT id FROM "Part" WHERE id=${partId} AND "userId"=${userId}`
     if (!part) return E('Część nie znaleziona', 404, req)
     for (let i = 0; i < imgOrder.length; i++) {
-      await d`UPDATE "PartImage" SET "order"=${i},"isCover"=${i===0} WHERE id=${imgOrder[i]}`
+      await d`UPDATE "PartImage" SET "order"=${i},"isCover"=${i===0} WHERE id=${imgOrder[i]} AND "partId"=${partId}`
     }
     const imgs = await d`SELECT * FROM "PartImage" WHERE "partId"=${partId} ORDER BY "order" ASC`
     return R(imgs, 200, req)
@@ -789,7 +797,7 @@ async function handleSync(req: Request, s: string[]): Promise<Response> {
   }
 
   if (m === 'GET' && s0 === 'status') {
-    const [log] = await d`SELECT * FROM "SyncLog" ORDER BY "createdAt" DESC LIMIT 1`
+    const [log] = await d`SELECT * FROM "SyncLog" WHERE "userId"=${userId} ORDER BY "createdAt" DESC LIMIT 1`
     return R(log ?? null, 200, req)
   }
 
@@ -799,8 +807,8 @@ async function handleSync(req: Request, s: string[]): Promise<Response> {
     const limit = Math.min(50, +(url.searchParams.get('limit')||20))
     const offset = (page-1)*limit
     const [logs, [cnt]] = await Promise.all([
-      d`SELECT * FROM "SyncLog" ORDER BY "createdAt" DESC LIMIT ${limit} OFFSET ${offset}`,
-      d`SELECT COUNT(*) n FROM "SyncLog"`,
+      d`SELECT * FROM "SyncLog" WHERE "userId"=${userId} ORDER BY "createdAt" DESC LIMIT ${limit} OFFSET ${offset}`,
+      d`SELECT COUNT(*) n FROM "SyncLog" WHERE "userId"=${userId}`,
     ])
     return R({ items: logs, pagination: { page, limit, total: +cnt.n, totalPages: Math.ceil(+cnt.n/limit) } }, 200, req)
   }
@@ -1260,7 +1268,12 @@ Zwróć obiekt JSON z dwoma polami:
     }
 
     const oaiData = await oaiRes.json()
-    const content = JSON.parse(oaiData.choices[0].message.content)
+    let content: Record<string, unknown>
+    try {
+      content = JSON.parse(oaiData.choices[0].message.content)
+    } catch {
+      return E('Nieprawidłowa odpowiedź z OpenAI', 502, req)
+    }
     return R({
       descriptionShort: String(content.descriptionShort ?? '').slice(0, 500),
       descriptionLong:  String(content.descriptionLong  ?? ''),

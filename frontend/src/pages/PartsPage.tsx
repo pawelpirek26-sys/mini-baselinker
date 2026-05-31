@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Plus, Search, Filter, Package, Edit2, Trash2,
@@ -6,6 +6,7 @@ import {
   CheckSquare, Square, Eye, EyeOff, X,
 } from 'lucide-react';
 import { useParts, useDeletePart, useBulkParts } from '../hooks/useParts';
+import { api } from '../lib/api';
 import { PART_CATEGORIES, CONDITION_LABELS, type PartCondition } from '../types';
 import clsx from 'clsx';
 
@@ -39,19 +40,27 @@ function exportCsv(parts: { id: string; name: string; oemNumber?: string | null;
 }
 
 export default function PartsPage() {
-  const [search, setSearch]       = useState('');
-  const [category, setCategory]   = useState('');
-  const [condition, setCondition] = useState('');
-  const [isActive, setIsActive]   = useState('');
-  const [page, setPage]           = useState(1);
-  const [selected, setSelected]   = useState<Set<string>>(new Set());
+  const [search, setSearch]           = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [category, setCategory]       = useState('');
+  const [condition, setCondition]     = useState('');
+  const [isActive, setIsActive]       = useState('');
+  const [page, setPage]               = useState(1);
+  const [selected, setSelected]       = useState<Set<string>>(new Set());
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [search]);
 
   const deletePart = useDeletePart();
   const bulk       = useBulkParts();
 
   const { data, isLoading } = useParts({
     page, limit: 20,
-    search: search || undefined,
+    search: debouncedSearch || undefined,
     category: category || undefined,
     condition: condition as PartCondition || undefined,
     isActive: isActive as 'true' | 'false' || undefined,
@@ -98,8 +107,22 @@ export default function PartsPage() {
     exportCsv(toExport);
   }
 
-  function handleExportAll() {
-    exportCsv(items);
+  async function handleExportAll() {
+    const params = new URLSearchParams({ limit: '100', sortBy: 'createdAt', sortDir: 'desc' });
+    if (debouncedSearch) params.set('search', debouncedSearch);
+    if (category) params.set('category', category);
+    if (condition) params.set('condition', condition);
+    if (isActive) params.set('isActive', isActive);
+    const allParts: typeof items = [];
+    let pg = 1;
+    while (true) {
+      params.set('page', String(pg));
+      const { data: res } = await api.get(`/parts?${params}`);
+      allParts.push(...res.items);
+      if (pg >= res.pagination.totalPages) break;
+      pg++;
+    }
+    exportCsv(allParts);
   }
 
   function confirmDelete(id: string, name: string) {
@@ -138,7 +161,7 @@ export default function PartsPage() {
             type="text"
             placeholder="Szukaj nazwy, numeru OEM..."
             value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            onChange={(e) => setSearch(e.target.value)}
             className="input pl-9"
           />
         </div>

@@ -24,7 +24,7 @@ export default function AutolinePage() {
   const [feedTitle,      setFeedTitle]       = useState('Mini Baselinker Export');
 
   const { data: stats,     refetch: refetchStats } = useAutolineStats();
-  const { data: parts }    = useParts({ limit: 500, sortBy: 'name', sortDir: 'asc' });
+  const { data: parts }    = useParts({ limit: 100, sortBy: 'name', sortDir: 'asc' });
   const { data: templates} = useTemplates('AUTOLINE');
 
   const preview     = useAutolinePreview({ templateId: selectedTmpl || undefined, partIds: selectedParts.length ? selectedParts : undefined });
