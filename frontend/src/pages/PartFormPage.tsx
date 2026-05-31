@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -23,6 +23,7 @@ const schema = z.object({
   stockMin: z.coerce.number().int().min(0),
   descriptionShort: z.string().optional(),
   descriptionLong: z.string().optional(),
+  isActive: z.boolean().default(true),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -48,6 +49,7 @@ export default function PartFormPage() {
 
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError,   setAiError]   = useState('');
+  const bruttoManualRef = useRef(false);
 
   const { register, handleSubmit, reset, watch, setValue, getValues, formState: { errors, isSubmitting } } =
     useForm<FormData>({
@@ -58,6 +60,7 @@ export default function PartFormPage() {
         stock: 0,
         stockMin: 1,
         category: 'inne',
+        isActive: true,
       },
     });
 
@@ -77,14 +80,15 @@ export default function PartFormPage() {
       stockMin: existing.stockMin,
       descriptionShort: existing.descriptionShort ?? '',
       descriptionLong: existing.descriptionLong ?? '',
+      isActive: existing.isActive,
     });
   }, [existing, reset]);
 
-  // Auto-calculate brutto from netto
+  // Auto-calculate brutto from netto (skip if user manually edited brutto)
   const priceNet = watch('priceNet');
   const vatRate = watch('vatRate');
   useEffect(() => {
-    if (priceNet && vatRate !== undefined) {
+    if (!bruttoManualRef.current && priceNet && vatRate !== undefined) {
       setValue('priceBrutto', Math.round(priceNet * (1 + vatRate / 100) * 100) / 100);
     }
   }, [priceNet, vatRate, setValue]);
@@ -197,7 +201,11 @@ export default function PartFormPage() {
               </select>
             </Field>
             <Field label="Cena brutto (PLN) *" error={errors.priceBrutto?.message}>
-              <input {...register('priceBrutto')} type="number" step="0.01" className="input font-mono" />
+              <input
+                {...register('priceBrutto')}
+                type="number" step="0.01" className="input font-mono"
+                onFocus={() => { bruttoManualRef.current = true; }}
+              />
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -242,6 +250,17 @@ export default function PartFormPage() {
             <textarea {...register('descriptionLong')} rows={8} className="input resize-y font-mono text-xs"
               placeholder="<h3>Tarcza hamulcowa</h3>&#10;<p>Opis techniczny...</p>" />
           </Field>
+        </div>
+
+        {/* Aktywność */}
+        <div className="card p-5">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" {...register('isActive')} className="accent-brand-500 w-4 h-4" />
+            <div>
+              <div className="text-sm font-medium text-slate-200">Część aktywna</div>
+              <div className="text-xs text-slate-500">Nieaktywne części są pomijane przy wystawieniu</div>
+            </div>
+          </label>
         </div>
 
         {/* Submit */}

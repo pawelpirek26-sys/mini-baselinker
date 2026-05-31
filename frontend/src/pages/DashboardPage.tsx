@@ -6,8 +6,8 @@ import { useTemplates } from '../hooks/useTemplates';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useSyncStatus } from '../hooks/useSync';
-import type { Listing } from '../types';
-import { STATUS_COLORS, PORTAL_COLORS, PART_CATEGORIES } from '../types';
+import type { Listing, ListingStatus } from '../types';
+import { STATUS_COLORS, STATUS_LABELS, PORTAL_COLORS, PART_CATEGORIES } from '../types';
 import { usePublishStatus } from '../hooks/usePublishJob';
 import clsx from 'clsx';
 
@@ -111,21 +111,27 @@ export default function DashboardPage() {
   const { data: partStats } = usePartStats();
   const { data: parts } = useParts({ limit: 5, sortBy: 'createdAt', sortDir: 'desc' });
   const { data: templates } = useTemplates();
-  const { data: listings } = useQuery<Listing[]>({
-    queryKey: ['listings-recent'],
-    queryFn: () => api.get('/listings').then((r) => r.data),
+
+  const { data: listingStats } = useQuery<Record<ListingStatus, number>>({
+    queryKey: ['listings-stats'],
+    queryFn: () => api.get('/listings/stats').then((r) => r.data),
   });
 
-  const activeListings = listings?.filter((l) => l.status === 'ACTIVE').length ?? 0;
-  const errorListings  = listings?.filter((l) => l.status === 'ERROR').length  ?? 0;
+  const { data: recentListings } = useQuery<{ items: Listing[] }>({
+    queryKey: ['listings-recent'],
+    queryFn: () => api.get('/listings', { params: { limit: 6 } }).then((r) => r.data),
+  });
+
+  const activeListings = listingStats?.ACTIVE ?? 0;
+  const errorListings  = listingStats?.ERROR  ?? 0;
 
   const stats = [
     { label: 'Wszystkie części',    value: partStats?.total      ?? '–', icon: Package,      color: 'text-brand-400',  to: '/parts' },
     { label: 'Aktywne części',      value: partStats?.active     ?? '–', icon: CheckCircle2, color: 'text-green-400',  to: '/parts?isActive=true' },
     { label: 'Nieaktywne części',   value: partStats?.inactive   ?? '–', icon: XCircle,      color: 'text-slate-500',  to: '/parts?isActive=false' },
     { label: 'Szablony',            value: templates?.length     ?? '–', icon: FileText,     color: 'text-purple-400', to: '/templates' },
-    { label: 'Aktywne wystawienia', value: activeListings,               icon: Megaphone,    color: 'text-blue-400',   to: '/listings' },
-    { label: 'Błędy wystawień',     value: errorListings,                icon: AlertCircle,  color: 'text-red-400',    to: '/listings' },
+    { label: 'Aktywne wystawienia', value: activeListings,               icon: Megaphone,    color: 'text-blue-400',   to: '/listings?status=ACTIVE' },
+    { label: 'Błędy wystawień',     value: errorListings,                icon: AlertCircle,  color: 'text-red-400',    to: '/listings?status=ERROR' },
   ];
 
   return (
@@ -208,7 +214,7 @@ export default function DashboardPage() {
           <Link to="/listings" className="text-xs text-brand-400 hover:text-brand-300">Zobacz wszystkie →</Link>
         </div>
         <div className="divide-y divide-slate-800">
-          {listings?.slice(0, 6).map((listing) => (
+          {recentListings?.items.map((listing) => (
             <div key={listing.id} className="flex items-center gap-3 px-5 py-3">
               <span className={`badge border ${PORTAL_COLORS[listing.portal]}`}>
                 {listing.portal}
@@ -216,10 +222,12 @@ export default function DashboardPage() {
               <div className="flex-1 min-w-0">
                 <div className="text-sm text-slate-300 truncate">{listing.part?.name ?? listing.partId}</div>
               </div>
-              <span className={`badge ${STATUS_COLORS[listing.status]}`}>{listing.status}</span>
+              <span className={`badge ${STATUS_COLORS[listing.status]}`}>
+                {STATUS_LABELS[listing.status]}
+              </span>
             </div>
           ))}
-          {!listings?.length && (
+          {!recentListings?.items.length && (
             <div className="px-5 py-8 text-center text-sm text-slate-500">
               Brak wystawień. Przejdź do części i wystaw je na portale.
             </div>

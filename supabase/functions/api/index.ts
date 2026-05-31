@@ -380,25 +380,41 @@ async function handleListings(req: Request, s: string[], url: URL): Promise<Resp
   const m = req.method
   const [s0, s1] = s
 
+  if (m === 'GET' && s0 === 'stats') {
+    const rows = await d`SELECT status, COUNT(*) n FROM "Listing" WHERE "userId"=${userId} GROUP BY status`
+    const counts = Object.fromEntries(rows.map((r: any) => [r.status, +r.n]))
+    return R(counts, 200, req)
+  }
+
   if (m === 'GET' && !s0) {
     const partId = url.searchParams.get('partId') || ''
     const portal = url.searchParams.get('portal') || ''
     const status = url.searchParams.get('status') || ''
+    const page  = Math.max(1, +(url.searchParams.get('page') || 1))
+    const limit = Math.min(100, +(url.searchParams.get('limit') || 50))
+    const offset = (page - 1) * limit
     const conds = [`l."userId"=$1`]
     const params: unknown[] = [userId]
     let n = 2
     if (partId) { conds.push(`l."partId"=$${n++}`); params.push(partId) }
     if (portal) { conds.push(`l.portal=$${n++}`); params.push(portal) }
     if (status) { conds.push(`l.status=$${n++}`); params.push(status) }
-    const rows = await d.unsafe(
-      `SELECT l.*,p.id pid,p.name pname,p."oemNumber" poem,t.id tid,t.name tname,t.portal tportal FROM "Listing" l JOIN "Part" p ON p.id=l."partId" JOIN "Template" t ON t.id=l."templateId" WHERE ${conds.join(' AND ')} ORDER BY l."updatedAt" DESC`,
-      params
-    )
-    return R(rows.map((l: any) => ({
-      ...l,
-      part: { id: l.pid, name: l.pname, oemNumber: l.poem },
-      template: { id: l.tid, name: l.tname, portal: l.tportal },
-    })), 200, req)
+    const where = conds.join(' AND ')
+    const [rows, [cnt]] = await Promise.all([
+      d.unsafe(
+        `SELECT l.*,p.id pid,p.name pname,p."oemNumber" poem,t.id tid,t.name tname,t.portal tportal FROM "Listing" l JOIN "Part" p ON p.id=l."partId" JOIN "Template" t ON t.id=l."templateId" WHERE ${where} ORDER BY l."updatedAt" DESC LIMIT $${n} OFFSET $${n+1}`,
+        [...params, limit, offset]
+      ),
+      d.unsafe(`SELECT COUNT(*) total FROM "Listing" l WHERE ${where}`, params),
+    ])
+    return R({
+      items: rows.map((l: any) => ({
+        ...l,
+        part: { id: l.pid, name: l.pname, oemNumber: l.poem },
+        template: { id: l.tid, name: l.tname, portal: l.tportal },
+      })),
+      pagination: { page, limit, total: +cnt.total, totalPages: Math.ceil(+cnt.total / limit) },
+    }, 200, req)
   }
 
   if (m === 'POST' && s0 === 'bulk') {

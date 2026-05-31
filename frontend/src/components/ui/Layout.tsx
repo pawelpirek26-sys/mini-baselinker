@@ -1,21 +1,37 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Package, FileText, Megaphone,
-  Truck, LogOut, ChevronRight, Settings, FileDown, Zap, Upload, RefreshCw
+  Truck, LogOut, ChevronRight, Settings, FileDown,
+  Zap, Upload, RefreshCw,
 } from 'lucide-react';
 import { useAuthStore } from '../../lib/api';
 import clsx from 'clsx';
 
-const NAV = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/publish',   icon: Zap,             label: 'Publikuj' },
-  { to: '/parts',     icon: Package,         label: 'Części' },
-  { to: '/templates', icon: FileText,         label: 'Szablony' },
-  { to: '/listings',  icon: Megaphone,        label: 'Wystawienia' },
-  { to: '/autoline',  icon: FileDown,         label: 'Autoline' },
-  { to: '/import',    icon: Upload,          label: 'Import' },
-  { to: '/sync',      icon: RefreshCw,       label: 'Sync magazyn' },
-  { to: '/settings',  icon: Settings,         label: 'Ustawienia' },
+const NAV_GROUPS = [
+  {
+    label: 'Zarządzanie',
+    items: [
+      { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+      { to: '/parts',     icon: Package,         label: 'Części' },
+      { to: '/templates', icon: FileText,         label: 'Szablony' },
+      { to: '/listings',  icon: Megaphone,        label: 'Wystawienia' },
+    ],
+  },
+  {
+    label: 'Działania',
+    items: [
+      { to: '/publish',  icon: Zap,      label: 'Publikuj' },
+      { to: '/import',   icon: Upload,   label: 'Import CSV' },
+      { to: '/autoline', icon: FileDown, label: 'Autoline export' },
+      { to: '/sync',     icon: RefreshCw, label: 'Sync magazyn' },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { to: '/settings', icon: Settings, label: 'Ustawienia' },
+    ],
+  },
 ];
 
 export default function Layout() {
@@ -43,28 +59,37 @@ export default function Layout() {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 p-3 space-y-0.5">
-          {NAV.map(({ to, icon: Icon, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors group',
-                  isActive
-                    ? 'bg-brand-600/20 text-brand-400 font-medium'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800',
-                )
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <Icon size={16} />
-                  <span className="flex-1">{label}</span>
-                  {isActive && <ChevronRight size={12} className="text-brand-500" />}
-                </>
-              )}
-            </NavLink>
+        <nav className="flex-1 p-3 space-y-4 overflow-y-auto">
+          {NAV_GROUPS.map((group) => (
+            <div key={group.label}>
+              <div className="px-3 mb-1 text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                {group.label}
+              </div>
+              <div className="space-y-0.5">
+                {group.items.map(({ to, icon: Icon, label }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    className={({ isActive }) =>
+                      clsx(
+                        'flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors group',
+                        isActive
+                          ? 'bg-brand-600/20 text-brand-400 font-medium'
+                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800',
+                      )
+                    }
+                  >
+                    {({ isActive }) => (
+                      <>
+                        <Icon size={16} />
+                        <span className="flex-1">{label}</span>
+                        {isActive && <ChevronRight size={12} className="text-brand-500" />}
+                      </>
+                    )}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
 

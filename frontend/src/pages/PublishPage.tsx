@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Zap, CheckCircle2, XCircle, Loader2, Clock,
@@ -181,9 +181,27 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
 export default function PublishPage() {
   const { state, startJob, reset } = usePublishJob();
   const { data: publishStatus }    = usePublishStatus();
-  const [search,   setSearch]      = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch]           = useState('');
   const [selectedPart, setSelectedPart] = useState<{ id: string; name: string; oemNumber?: string | null } | null>(null);
   const [selectedPortals, setSelectedPortals] = useState<Portal[]>(['ALLEGRO', 'OTOMOTO', 'AUTOLINE']);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounce search input
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setSearch(searchInput), 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [searchInput]);
+
+  // Default to only connected portals once status loads
+  useEffect(() => {
+    if (!publishStatus) return;
+    const connected = (Object.keys(PORTAL_META) as Portal[]).filter(
+      (p) => p === 'AUTOLINE' || publishStatus.portals[p]?.connected,
+    );
+    if (connected.length > 0) setSelectedPortals(connected);
+  }, [publishStatus]);
 
   const { data: parts } = useParts({
     search: search || undefined,
@@ -265,8 +283,8 @@ export default function PublishPage() {
             <div className="relative">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
               <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 placeholder="Szukaj nazwy lub OEM..."
                 className="input pl-8 text-sm"
                 disabled={isRunning}

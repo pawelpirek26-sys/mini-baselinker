@@ -1,10 +1,14 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Edit2, Trash2, Star, FileText, Plus } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Edit2, Star, FileText, Plus, Eye, EyeOff } from 'lucide-react';
 import { useTemplates, useDeleteTemplate } from '../hooks/useTemplates';
+import { api } from '../lib/api';
 import type { Portal, Template } from '../types';
 import { PORTAL_COLORS } from '../types';
+import { ConfirmButton } from '../components/ui/ConfirmButton';
 import clsx from 'clsx';
+import toast from 'react-hot-toast';
 
 const PORTALS: Portal[] = ['ALLEGRO', 'OTOMOTO', 'AUTOLINE'];
 
@@ -12,6 +16,17 @@ export default function TemplatesPage() {
   const [activePortal, setActivePortal] = useState<Portal | ''>('');
   const { data: templates } = useTemplates(activePortal || undefined);
   const deleteTemplate = useDeleteTemplate();
+  const qc = useQueryClient();
+
+  const toggleActive = useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
+      api.patch(`/templates/${id}`, { isActive }).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['templates'] });
+    },
+    onError: () => toast.error('Błąd aktualizacji'),
+  });
+
   const grouped = PORTALS.reduce((acc, p) => {
     acc[p] = (templates ?? []).filter((t) => t.portal === p);
     return acc;
@@ -31,13 +46,18 @@ export default function TemplatesPage() {
 
       {/* Portal filter */}
       <div className="flex gap-2">
-        <button onClick={() => setActivePortal('')}
-                className={clsx('btn-secondary py-1 px-3', !activePortal && 'bg-slate-700 text-white')}>
+        <button
+          onClick={() => setActivePortal('')}
+          className={clsx('btn-secondary py-1 px-3', !activePortal && 'bg-slate-700 text-white')}
+        >
           Wszystkie
         </button>
         {PORTALS.map((p) => (
-          <button key={p} onClick={() => setActivePortal(p)}
-                  className={clsx('btn-secondary py-1 px-3', activePortal === p && 'bg-slate-700 text-white')}>
+          <button
+            key={p}
+            onClick={() => setActivePortal(p)}
+            className={clsx('btn-secondary py-1 px-3', activePortal === p && 'bg-slate-700 text-white')}
+          >
             {p}
           </button>
         ))}
@@ -53,38 +73,75 @@ export default function TemplatesPage() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {grouped[portal]?.map((tmpl) => (
-                <div key={tmpl.id} className={clsx('card p-4 space-y-3', !tmpl.isActive && 'opacity-50')}>
+                <div
+                  key={tmpl.id}
+                  className={clsx(
+                    'card p-4 space-y-3 transition-all',
+                    !tmpl.isActive && 'border-dashed border-slate-700',
+                  )}
+                >
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
                       <FileText size={14} className="text-slate-400 shrink-0" />
-                      <span className="text-sm font-medium text-slate-200">{tmpl.name}</span>
+                      <span className={clsx('text-sm font-medium truncate', tmpl.isActive ? 'text-slate-200' : 'text-slate-500')}>
+                        {tmpl.name}
+                      </span>
                     </div>
-                    {tmpl.isDefault && (
-                      <Star size={13} className="text-yellow-400 shrink-0 fill-yellow-400" />
-                    )}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {tmpl.isDefault && (
+                        <Star size={13} className="text-yellow-400 fill-yellow-400" />
+                      )}
+                      {!tmpl.isActive && (
+                        <span className="text-xs bg-slate-800 text-slate-500 px-1.5 py-0.5 rounded">
+                          Nieaktywny
+                        </span>
+                      )}
+                    </div>
                   </div>
+
                   {tmpl.description && (
                     <p className="text-xs text-slate-500">{tmpl.description}</p>
                   )}
-                  <div className="text-xs text-slate-500">
-                    <span className="text-slate-400">{tmpl._count?.listings ?? 0}</span> wystawień
-                  </div>
+
+                  <Link
+                    to={`/listings?portal=${tmpl.portal}`}
+                    className="text-xs text-slate-500 hover:text-brand-400 transition-colors block"
+                  >
+                    {tmpl._count?.listings ?? 0} wystawień →
+                  </Link>
+
                   <div className="flex gap-2 pt-1">
-                    <Link to={`/templates/${tmpl.id}/edit`} className="btn-secondary py-1 px-2 text-xs flex-1 justify-center">
+                    <Link
+                      to={`/templates/${tmpl.id}/edit`}
+                      className="btn-secondary py-1 px-2 text-xs flex-1 justify-center"
+                    >
                       <Edit2 size={11} /> Edytuj
                     </Link>
                     <button
-                      onClick={() => confirm('Usunąć szablon?') && deleteTemplate.mutate(tmpl.id)}
-                      className="btn-danger py-1 px-2 text-xs"
+                      onClick={() => toggleActive.mutate({ id: tmpl.id, isActive: !tmpl.isActive })}
+                      disabled={toggleActive.isPending}
+                      className={clsx(
+                        'btn-secondary py-1 px-2 text-xs',
+                        tmpl.isActive ? 'text-green-400 hover:text-green-300' : 'text-slate-500',
+                      )}
+                      title={tmpl.isActive ? 'Dezaktywuj szablon' : 'Aktywuj szablon'}
                     >
-                      <Trash2 size={11} />
+                      {tmpl.isActive ? <Eye size={11} /> : <EyeOff size={11} />}
                     </button>
+                    <ConfirmButton
+                      onConfirm={() => deleteTemplate.mutate(tmpl.id)}
+                      confirmLabel="Usuń"
+                      className="btn-danger py-1 px-2 text-xs"
+                    />
                   </div>
                 </div>
               ))}
               {!grouped[portal]?.length && (
                 <div className="card p-6 text-center text-sm text-slate-500 border-dashed">
-                  Brak szablonów dla {portal}
+                  Brak szablonów dla {portal}.{' '}
+                  <Link to="/templates/new" className="text-brand-400 hover:text-brand-300">
+                    Utwórz →
+                  </Link>
                 </div>
               )}
             </div>

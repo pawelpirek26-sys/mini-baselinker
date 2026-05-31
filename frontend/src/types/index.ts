@@ -137,6 +137,16 @@ export const PORTAL_COLORS: Record<Portal, string> = {
   AUTOLINE: 'bg-green-500/20 text-green-400 border-green-800/50',
 };
 
+export const STATUS_LABELS: Record<ListingStatus, string> = {
+  DRAFT:      'Szkic',
+  PENDING:    'Oczekuje',
+  PROCESSING: 'W trakcie',
+  ACTIVE:     'Aktywne',
+  EXPIRED:    'Wygasłe',
+  ENDED:      'Zakończone',
+  ERROR:      'Błąd',
+};
+
 export const STATUS_COLORS: Record<ListingStatus, string> = {
   DRAFT: 'bg-slate-700 text-slate-300',
   PENDING: 'bg-yellow-500/20 text-yellow-400',

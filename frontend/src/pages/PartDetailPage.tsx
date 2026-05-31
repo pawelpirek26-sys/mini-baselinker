@@ -11,7 +11,8 @@ import { usePublishListing, usePublishPart, useAllegroStatus } from '../hooks/us
 import { usePublishToOtomoto, useOtomotoStatus } from '../hooks/useOtomoto';
 import { api } from '../lib/api';
 import type { Listing, Compatibility } from '../types';
-import { PORTAL_COLORS, STATUS_COLORS, CONDITION_LABELS, TRUCK_BRANDS } from '../types';
+import { PORTAL_COLORS, STATUS_COLORS, STATUS_LABELS, CONDITION_LABELS, TRUCK_BRANDS } from '../types';
+import { ConfirmButton } from '../components/ui/ConfirmButton';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
 
@@ -104,12 +105,11 @@ export default function PartDetailPage() {
               <Link to={`/parts/${id}/edit`} className="btn-secondary">
                 <Edit2 size={14} /> Edytuj
               </Link>
-              <button
-                onClick={() => { if (confirm('Usunąć tę część?')) { deletePart.mutate(id!); navigate('/parts'); }}}
-                className="btn-danger"
-              >
-                <Trash2 size={14} />
-              </button>
+              <ConfirmButton
+                onConfirm={() => { deletePart.mutate(id!); navigate('/parts'); }}
+                label="Usuń część"
+                confirmLabel="Na pewno usuń"
+              />
             </div>
           </div>
         </div>
@@ -135,8 +135,12 @@ export default function PartDetailPage() {
 
       {/* Tabs */}
       <div className="flex border-b border-slate-800">
-        {([['details', Package, 'Szczegóły'], ['compatibility', Car, 'Kompatybilność'], ['listings', Megaphone, 'Wystawienia']] as const).map(
-          ([key, Icon, label]) => (
+        {([
+          ['details', Package, 'Szczegóły', null] as const,
+          ['compatibility', Car, 'Kompatybilność', part.compatibility?.length ?? 0] as const,
+          ['listings', Megaphone, 'Wystawienia', part.listings?.length ?? 0] as const,
+        ]).map(
+          ([key, Icon, label, count]) => (
             <button
               key={key}
               onClick={() => setTab(key)}
@@ -147,7 +151,13 @@ export default function PartDetailPage() {
                   : 'border-transparent text-slate-500 hover:text-slate-300',
               )}
             >
-              <Icon size={14} /> {label}
+              <Icon size={14} />
+              {label}
+              {count !== null && count > 0 && (
+                <span className="text-xs bg-slate-700 text-slate-400 rounded-full px-1.5 py-0.5 font-mono leading-none">
+                  {count}
+                </span>
+              )}
             </button>
           )
         )}
@@ -293,10 +303,15 @@ export default function PartDetailPage() {
                     </td>
                     <td className="px-3 py-2.5 text-slate-500 font-mono text-xs">{c.engineCode ?? '–'}</td>
                     <td className="px-5 py-2.5">
-                      <button onClick={() => delCompat.mutate(c.id)}
-                              className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 text-slate-500 transition-all">
-                        <Trash2 size={13} />
-                      </button>
+                      <div className="opacity-0 group-hover:opacity-100 transition-all">
+                        <ConfirmButton
+                          onConfirm={() => delCompat.mutate(c.id)}
+                          confirmLabel="Usuń"
+                          className="p-1 text-slate-500 hover:text-red-400 transition-colors"
+                        >
+                          <Trash2 size={13} />
+                        </ConfirmButton>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -351,10 +366,18 @@ export default function PartDetailPage() {
                 </button>
               </div>
             </div>
-            <p className="text-xs text-slate-500">
-              „Wszystkie portale" tworzy wystawienia wg domyślnych szablonów.
-              „Wystaw na Allegro" natychmiast wysyła ofertę przez API.
-            </p>
+            {(() => {
+              const defaults = templates?.filter((t) => t.isDefault) ?? [];
+              return (
+                <p className="text-xs text-slate-500">
+                  „Wszystkie portale" użyje domyślnych szablonów:{' '}
+                  {defaults.length
+                    ? defaults.map((t) => <span key={t.id} className="text-slate-400 font-medium">{t.name}</span>).reduce((a, b) => <>{a}, {b}</>)
+                    : <span className="text-amber-400">brak domyślnych szablonów</span>
+                  }
+                </p>
+              );
+            })()}
           </div>
 
           {/* Per-template */}
@@ -370,7 +393,7 @@ export default function PartDetailPage() {
                   <div className="text-sm font-medium text-slate-200 mb-3">{tmpl.name}</div>
                   {existing ? (
                     <div className="space-y-2">
-                      <span className={`badge ${STATUS_COLORS[existing.status]}`}>{existing.status}</span>
+                      <span className={`badge ${STATUS_COLORS[existing.status]}`}>{STATUS_LABELS[existing.status]}</span>
                       <div className="flex gap-3 flex-wrap">
                         {existing.externalUrl && (
                           <a href={existing.externalUrl} target="_blank" rel="noopener noreferrer"
@@ -427,7 +450,7 @@ export default function PartDetailPage() {
                       </td>
                       <td className="px-3 py-2.5 text-slate-400 text-xs">{l.template?.name ?? l.templateId}</td>
                       <td className="px-3 py-2.5">
-                        <span className={`badge ${STATUS_COLORS[l.status]}`}>{l.status}</span>
+                        <span className={`badge ${STATUS_COLORS[l.status]}`}>{STATUS_LABELS[l.status]}</span>
                       </td>
                       <td className="px-3 py-2.5">
                         {l.externalUrl ? (

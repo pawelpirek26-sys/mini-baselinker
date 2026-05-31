@@ -1,13 +1,14 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Plus, Search, Filter, Package, Edit2, Trash2,
   ChevronLeft, ChevronRight, Loader2, Download,
   CheckSquare, Square, Eye, EyeOff, X,
 } from 'lucide-react';
 import { useParts, useDeletePart, useBulkParts } from '../hooks/useParts';
-import { api } from '../lib/api';
 import { PART_CATEGORIES, CONDITION_LABELS, type PartCondition } from '../types';
+import { ConfirmButton } from '../components/ui/ConfirmButton';
+import { api } from '../lib/api';
 import clsx from 'clsx';
 
 const CONDITION_BADGE: Record<PartCondition, string> = {
@@ -40,11 +41,13 @@ function exportCsv(parts: { id: string; name: string; oemNumber?: string | null;
 }
 
 export default function PartsPage() {
+  const [searchParams] = useSearchParams();
+
   const [search, setSearch]           = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [category, setCategory]       = useState('');
   const [condition, setCondition]     = useState('');
-  const [isActive, setIsActive]       = useState('');
+  const [isActive, setIsActive]       = useState(() => searchParams.get('isActive') || '');
   const [page, setPage]               = useState(1);
   const [selected, setSelected]       = useState<Set<string>>(new Set());
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -97,7 +100,6 @@ export default function PartsPage() {
 
   async function handleBulk(action: 'activate' | 'deactivate' | 'delete') {
     const ids = Array.from(selected);
-    if (action === 'delete' && !confirm(`Usunąć ${ids.length} części?`)) return;
     await bulk.mutateAsync({ ids, action });
     clearSelection();
   }
@@ -123,10 +125,6 @@ export default function PartsPage() {
       pg++;
     }
     exportCsv(allParts);
-  }
-
-  function confirmDelete(id: string, name: string) {
-    if (confirm(`Usunąć część "${name}"?`)) deletePart.mutate(id);
   }
 
   return (
@@ -186,47 +184,6 @@ export default function PartsPage() {
           </select>
         </div>
       </div>
-
-      {/* Bulk action bar */}
-      {selected.size > 0 && (
-        <div className="card p-3 flex items-center gap-3 border-brand-700 bg-brand-900/20">
-          <span className="text-sm text-slate-300 font-medium">
-            {selected.size} zaznaczonych
-          </span>
-          <div className="flex items-center gap-2 ml-auto">
-            <button
-              onClick={() => handleBulk('activate')}
-              disabled={bulk.isPending}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-green-600/20 text-green-400 hover:bg-green-600/30 rounded-lg transition-colors"
-            >
-              <Eye size={12} /> Aktywuj
-            </button>
-            <button
-              onClick={() => handleBulk('deactivate')}
-              disabled={bulk.isPending}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-slate-700 text-slate-300 hover:bg-slate-600 rounded-lg transition-colors"
-            >
-              <EyeOff size={12} /> Dezaktywuj
-            </button>
-            <button
-              onClick={handleExportSelected}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-slate-700 text-slate-300 hover:bg-slate-600 rounded-lg transition-colors"
-            >
-              <Download size={12} /> Eksportuj zaznaczone
-            </button>
-            <button
-              onClick={() => handleBulk('delete')}
-              disabled={bulk.isPending}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors"
-            >
-              <Trash2 size={12} /> Usuń
-            </button>
-            <button onClick={clearSelection} className="p-1.5 text-slate-500 hover:text-slate-300">
-              <X size={14} />
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Table */}
       <div className="card overflow-hidden">
@@ -323,10 +280,13 @@ export default function PartsPage() {
                               className="p-1.5 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors">
                           <Edit2 size={13} />
                         </Link>
-                        <button onClick={() => confirmDelete(part.id, part.name)}
-                                className="p-1.5 rounded hover:bg-red-900/30 text-slate-400 hover:text-red-400 transition-colors">
+                        <ConfirmButton
+                          onConfirm={() => deletePart.mutate(part.id)}
+                          confirmLabel="Usuń"
+                          className="p-1.5 rounded hover:bg-red-900/30 text-slate-400 hover:text-red-400 transition-colors"
+                        >
                           <Trash2 size={13} />
-                        </button>
+                        </ConfirmButton>
                       </div>
                     </td>
                   </tr>
@@ -346,7 +306,6 @@ export default function PartsPage() {
               <div className="px-5 py-3 border-t border-slate-800 flex items-center justify-between text-sm">
                 <span className="text-slate-500">
                   Strona {data?.pagination.page} z {data?.pagination.totalPages}
-                  {selected.size > 0 && <span className="ml-3 text-brand-400">{selected.size} zaznaczonych</span>}
                 </span>
                 <div className="flex gap-2">
                   <button onClick={() => setPage((p) => p - 1)} disabled={page <= 1} className="btn-secondary py-1 px-2">
@@ -361,6 +320,49 @@ export default function PartsPage() {
           </>
         )}
       </div>
+
+      {/* Floating bulk toolbar */}
+      {selected.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50
+                        bg-slate-800 border border-slate-700 rounded-xl shadow-2xl shadow-black/40
+                        flex items-center gap-3 px-5 py-3">
+          <span className="text-sm text-slate-300 font-medium whitespace-nowrap">
+            {selected.size} {selected.size === 1 ? 'zaznaczona' : selected.size < 5 ? 'zaznaczone' : 'zaznaczonych'}
+          </span>
+          <div className="w-px h-5 bg-slate-700 shrink-0" />
+          <button
+            onClick={handleExportSelected}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs btn-secondary"
+          >
+            <Download size={12} /> Eksportuj
+          </button>
+          <button
+            onClick={() => handleBulk('activate')}
+            disabled={bulk.isPending}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-green-400 bg-green-600/15 hover:bg-green-600/25 border border-green-800/40 rounded-lg transition-colors"
+          >
+            <Eye size={12} /> Aktywuj
+          </button>
+          <button
+            onClick={() => handleBulk('deactivate')}
+            disabled={bulk.isPending}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs btn-secondary"
+          >
+            <EyeOff size={12} /> Dezaktywuj
+          </button>
+          <ConfirmButton
+            onConfirm={() => handleBulk('delete')}
+            confirmLabel={`Usuń ${selected.size}`}
+            disabled={bulk.isPending}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs btn-danger"
+          >
+            <Trash2 size={12} /> Usuń
+          </ConfirmButton>
+          <button onClick={clearSelection} className="ml-1 p-1 text-slate-500 hover:text-slate-300 transition-colors">
+            <X size={14} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
