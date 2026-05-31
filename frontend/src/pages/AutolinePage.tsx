@@ -21,9 +21,10 @@ export default function AutolinePage() {
   const [selectedParts,  setSelectedParts]  = useState<string[]>([]);
   const [selectedTmpl,   setSelectedTmpl]   = useState('');
   const [showPreview,    setShowPreview]     = useState(false);
+  const [feedTitle,      setFeedTitle]       = useState('Mini Baselinker Export');
 
   const { data: stats,     refetch: refetchStats } = useAutolineStats();
-  const { data: parts }    = useParts({ limit: 100, sortBy: 'name', sortDir: 'asc' });
+  const { data: parts }    = useParts({ limit: 500, sortBy: 'name', sortDir: 'asc' });
   const { data: templates} = useTemplates('AUTOLINE');
 
   const preview     = useAutolinePreview({ templateId: selectedTmpl || undefined, partIds: selectedParts.length ? selectedParts : undefined });
@@ -52,7 +53,7 @@ export default function AutolinePage() {
     if (format === 'csv') {
       exportCsv.mutate(params);
     } else {
-      exportXml.mutate(params);
+      exportXml.mutate({ ...params, feedTitle });
     }
   }
 
@@ -155,6 +156,20 @@ export default function AutolinePage() {
               )}
             </div>
 
+            {/* Tytuł feedu (XML only) */}
+            {format === 'xml' && (
+              <div>
+                <label className="label">Tytuł feedu XML</label>
+                <input
+                  type="text"
+                  value={feedTitle}
+                  onChange={(e) => setFeedTitle(e.target.value)}
+                  className="input"
+                  placeholder="Mini Baselinker Export"
+                />
+              </div>
+            )}
+
             {/* Przyciski akcji */}
             <div className="space-y-2 pt-2">
               <button
@@ -194,6 +209,25 @@ export default function AutolinePage() {
                     : <CheckSquare size={14} />}
                   Oznacz jako wyeksportowane
                 </button>
+              )}
+
+              {(exportCsv.isError || exportXml.isError) && (
+                <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-800/40 rounded-lg text-xs text-red-400">
+                  <AlertCircle size={13} className="shrink-0 mt-0.5" />
+                  <span>
+                    {(exportCsv.error as any)?.response?.data?.error ??
+                     (exportXml.error as any)?.response?.data?.error ??
+                     'Błąd eksportu'}
+                  </span>
+                </div>
+              )}
+              {markExported.isError && (
+                <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-800/40 rounded-lg text-xs text-red-400">
+                  <AlertCircle size={13} className="shrink-0 mt-0.5" />
+                  <span>
+                    {(markExported.error as any)?.response?.data?.error ?? 'Błąd oznaczania'}
+                  </span>
+                </div>
               )}
             </div>
           </div>

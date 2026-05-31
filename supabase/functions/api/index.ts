@@ -6,11 +6,13 @@ import { z } from 'npm:zod@3'
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
-const DB_URL  = Deno.env.get('DATABASE_URL')!
-const SB_URL  = Deno.env.get('SUPABASE_URL')!
-const SB_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-const JWT_RAW = Deno.env.get('JWT_SECRET') ?? 'change-me-in-prod'
-const JWT_KEY = new TextEncoder().encode(JWT_RAW)
+const DB_URL      = Deno.env.get('DATABASE_URL')!
+const SB_URL      = Deno.env.get('SUPABASE_URL')!
+const SB_KEY      = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const JWT_RAW     = Deno.env.get('JWT_SECRET') ?? 'change-me-in-prod'
+const JWT_KEY     = new TextEncoder().encode(JWT_RAW)
+const RESEND_KEY  = Deno.env.get('RESEND_API_KEY') ?? ''
+const RESEND_FROM = Deno.env.get('RESEND_FROM') ?? 'Mini Baselinker <onboarding@resend.dev>'
 
 let _db: ReturnType<typeof postgres> | null = null
 function db(): ReturnType<typeof postgres> {
@@ -21,6 +23,27 @@ function db(): ReturnType<typeof postgres> {
 const sb = createClient(SB_URL, SB_KEY, { auth: { persistSession: false } })
 
 function uid(): string { return crypto.randomUUID().replace(/-/g, '') }
+
+// ─── Email ────────────────────────────────────────────────────────────────────
+
+interface NotifSettings { listingError: boolean; listingActive: boolean; syncComplete: boolean; lowStock: boolean }
+const NOTIF_DEFAULTS: NotifSettings = { listingError: true, listingActive: false, syncComplete: true, lowStock: true }
+
+async function sendEmail(to: string, subject: string, html: string): Promise<void> {
+  if (!RESEND_KEY) return
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_KEY}` },
+    body: JSON.stringify({ from: RESEND_FROM, to: [to], subject, html }),
+  })
+  if (!res.ok) console.error('Resend error', res.status, await res.text())
+}
+
+async function getNotifSettings(userId: string): Promise<{ email: string; settings: NotifSettings } | null> {
+  const [u] = await db()`SELECT email,"notificationSettings" FROM "User" WHERE id=${userId}`
+  if (!u) return null
+  return { email: u.email, settings: { ...NOTIF_DEFAULTS, ...(u.notificationSettings ?? {}) } }
+}
 
 // ─── CORS & Responses ─────────────────────────────────────────────────────────
 
@@ -106,6 +129,36 @@ async function handleAuth(req: Request, s: string[]): Promise<Response> {
     const [u] = await d`SELECT id,email,name,role FROM "User" WHERE id = ${userId}`
     if (!u) return E('Użytkownik nie istnieje', 404, req)
     return R(u, 200, req)
+  }
+
+  if (req.method === 'GET' && action === 'notification-settings') {
+    const { userId } = await auth(req)
+    const ns = await getNotifSettings(userId)
+    if (!ns) return E('Użytkownik nie istnieje', 404, req)
+    return R(ns.settings, 200, req)
+  }
+
+  if (req.method === 'PATCH' && action === 'notification-settings') {
+    const { userId } = await auth(req)
+    const body = await req.json()
+    const ns = await getNotifSettings(userId)
+    if (!ns) return E('Użytkownik nie istnieje', 404, req)
+    const updated: NotifSettings = { ...ns.settings }
+    for (const k of ['listingError', 'listingActive', 'syncComplete', 'lowStock'] as (keyof NotifSettings)[]) {
+      if (typeof body[k] === 'boolean') updated[k] = body[k]
+    }
+    await d`UPDATE "User" SET "notificationSettings"=${JSON.stringify(updated)} WHERE id=${userId}`
+    return R(updated, 200, req)
+  }
+
+  if (req.method === 'POST' && action === 'test-email') {
+    const { userId } = await auth(req)
+    const ns = await getNotifSettings(userId)
+    if (!ns) return E('Użytkownik nie istnieje', 404, req)
+    if (!RESEND_KEY) return E('RESEND_API_KEY nie skonfigurowany w Edge Function', 503, req)
+    await sendEmail(ns.email, 'Test powiadomień — Mini Baselinker',
+      `<div style="font-family:sans-serif;max-width:480px"><h2 style="color:#6366f1">Mini Baselinker</h2><p>Powiadomienia e-mail działają poprawnie ✅</p><p style="color:#64748b;font-size:13px">Wiadomość testowa wygenerowana ` + new Date().toLocaleString('pl-PL') + `</p></div>`)
+    return R({ ok: true, sentTo: ns.email }, 200, req)
   }
 
   return E('Not found', 404, req)
@@ -226,6 +279,13 @@ async function handleParts(req: Request, s: string[], url: URL): Promise<Respons
     await d`UPDATE "Part" SET ${d(fields)} WHERE id=${s0}`
     const [part] = await d`SELECT * FROM "Part" WHERE id=${s0}`
     const imgs = await d`SELECT * FROM "PartImage" WHERE "partId"=${s0} ORDER BY "order" ASC`
+    if ('stock' in fields && part.stock <= part.stockMin && part.stock >= 0) {
+      getNotifSettings(userId).then(ns => {
+        if (!ns?.settings.lowStock) return
+        return sendEmail(ns.email, `Niski stan magazynowy: ${part.name}`,
+          `<div style="font-family:sans-serif;max-width:480px"><h2 style="color:#f59e0b">⚠️ Niski stan magazynowy</h2><p>Część <strong>${part.name}</strong> ma stan <strong style="color:#ef4444">${part.stock}</strong> szt. (minimum: ${part.stockMin}).</p></div>`)
+      }).catch(e => console.error('notify stock', e))
+    }
     return R({ ...part, images: imgs }, 200, req)
   }
 
@@ -377,6 +437,21 @@ async function handleListings(req: Request, s: string[], url: URL): Promise<Resp
     await d`UPDATE "Listing" SET status=${body.status},"externalId"=${body.externalId??listing.externalId},"externalUrl"=${body.externalUrl??listing.externalUrl},"errorMessage"=${body.errorMessage??null},"updatedAt"=${now}${body.status==='ACTIVE'?d`,listedAt=${now}`:d``} WHERE id=${s0}`
     await d`INSERT INTO "ListingHistory" (id,"listingId",status,message,"createdAt") VALUES (${uid()},${s0},${body.status},${body.errorMessage??`Status zmieniony na ${body.status}`},${now})`
     const [updated] = await d`SELECT * FROM "Listing" WHERE id=${s0}`
+    if (body.status === 'ERROR' || body.status === 'ACTIVE') {
+      getNotifSettings(userId).then(ns => {
+        if (!ns) return
+        const should = body.status === 'ERROR' ? ns.settings.listingError : ns.settings.listingActive
+        if (!should) return
+        return d`SELECT name FROM "Part" WHERE id=${listing.partId}`.then(([p]: any[]) => {
+          const partName = p?.name ?? listing.partId
+          const subject = body.status === 'ERROR' ? `Błąd wystawienia: ${partName}` : `Wystawienie aktywne: ${partName}`
+          const html = body.status === 'ERROR'
+            ? `<div style="font-family:sans-serif;max-width:480px"><h2 style="color:#ef4444">Błąd wystawienia</h2><p>Część <strong>${partName}</strong> — wystawienie na <strong>${listing.portal}</strong> zakończyło się błędem.</p>${body.errorMessage?`<p style="background:#1e293b;padding:8px;border-radius:6px;font-size:13px;color:#f87171">${body.errorMessage}</p>`:''}</div>`
+            : `<div style="font-family:sans-serif;max-width:480px"><h2 style="color:#22c55e">Wystawienie aktywne ✅</h2><p>Część <strong>${partName}</strong> została pomyślnie wystawiona na <strong>${listing.portal}</strong>.</p></div>`
+          return sendEmail(ns.email, subject, html)
+        })
+      }).catch(e => console.error('notify listing', e))
+    }
     return R(updated, 200, req)
   }
 
@@ -686,6 +761,13 @@ async function runSync(userId: string, triggeredBy: string): Promise<string> {
 
     const status = stats.errors === 0 ? 'SUCCESS' : 'PARTIAL'
     await d`UPDATE "SyncLog" SET status=${status},"finishedAt"=${new Date()},"totalFetched"=${stats.totalFetched},created=${stats.created},updated=${stats.updated},deactivated=${stats.deactivated},errors=${stats.errors},"errorDetails"=${stats.errorDetails.length?JSON.stringify(stats.errorDetails):null} WHERE id=${logId}`
+    getNotifSettings(userId).then(ns => {
+      if (!ns?.settings.syncComplete) return
+      const emoji = stats.errors === 0 ? '✅' : '⚠️'
+      const subject = `${emoji} Synchronizacja zakończona — ${stats.totalFetched} pozycji`
+      const html = `<div style="font-family:sans-serif;max-width:480px"><h2 style="color:#6366f1">Synchronizacja z TruckParts</h2><ul style="line-height:2"><li>Pobrano: <strong>${stats.totalFetched}</strong></li><li>Nowe: <strong style="color:#22c55e">+${stats.created}</strong></li><li>Zaktualizowane: <strong style="color:#3b82f6">~${stats.updated}</strong></li><li>Dezaktywowane: <strong>${stats.deactivated}</strong></li>${stats.errors>0?`<li style="color:#ef4444">Błędy: <strong>${stats.errors}</strong></li>`:''}</ul></div>`
+      return sendEmail(ns.email, subject, html)
+    }).catch(e => console.error('notify sync', e))
     return logId
   } catch (e: any) {
     await d`UPDATE "SyncLog" SET status='ERROR',"finishedAt"=${new Date()},"errorDetails"=${JSON.stringify([e.message])} WHERE id=${logId}`
@@ -753,9 +835,14 @@ function xmlEsc(v: string|undefined): string {
 }
 
 function genXml(rows: Record<string, string|undefined>[], title: string): string {
+  const SCALAR_COLS = CSV_COLS.filter(c => c !== 'images')
   const items = rows.map(r => {
-    const fields = CSV_COLS.map(c => r[c] ? `    <${c}>${xmlEsc(r[c])}</${c}>` : '').filter(Boolean).join('\n')
-    return `  <item>\n${fields}\n  </item>`
+    const fields = SCALAR_COLS.map(c => r[c] ? `    <${c}>${xmlEsc(r[c])}</${c}>` : '').filter(Boolean)
+    if (r.images) {
+      const imgTags = r.images.split(',').filter(Boolean).map(u => `      <image>${xmlEsc(u.trim())}</image>`).join('\n')
+      fields.push(`    <images>\n${imgTags}\n    </images>`)
+    }
+    return `  <item>\n${fields.join('\n')}\n  </item>`
   }).join('\n')
   return `<?xml version="1.0" encoding="UTF-8"?>\n<autoline_feed>\n  <meta><title>${xmlEsc(title)}</title><generated>${new Date().toISOString()}</generated><count>${rows.length}</count></meta>\n  <items>\n${items}\n  </items>\n</autoline_feed>`
 }
@@ -785,6 +872,16 @@ function buildRow(part: any, template: any): Record<string, string|undefined> {
     part_type: AUTOLINE_CATS[part.category] ?? 'Other parts',
     condition: part.condition === 'NEW' ? 'new' : part.condition === 'REGENERATED' ? 'regenerated' : 'used',
     description: desc || undefined,
+    tech_params: (() => {
+      if (!part.technicalParams) return undefined
+      try {
+        const tp = typeof part.technicalParams === 'string' ? JSON.parse(part.technicalParams) : part.technicalParams
+        if (tp && typeof tp === 'object' && !Array.isArray(tp)) {
+          return Object.entries(tp).map(([k, v]) => `${k}: ${v}`).join(' | ').slice(0, 500) || undefined
+        }
+        return String(tp).slice(0, 500) || undefined
+      } catch { return undefined }
+    })(),
     images: imgs || undefined,
   }
 }
